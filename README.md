@@ -44,7 +44,7 @@ Same dumb premise. Same blocky world. Same meme enemies waddling at you while a 
 The difference is how it got built. One clean, complete prompt. One shot. No twelve-hour spiral of feeding the same files back into the model. And [jCodeMunch-MCP](https://jcodemunch.com) sitting in the middle the entire time, squeezing the junk out of the context before it ever reached the model, so the token bill stayed in the basement where it belongs.
 
 > **Nick's bill: $81,267.**
-> **My bill: $1.37.**
+> **My bill: $1.39.**
 > Same brainrot. Different uncle.
 
 The full one-shot prompt I used is included in this repo ([`PROMPT.md`](PROMPT.md)), so you can run it yourself and watch the whole game appear in a single pass. Open the result in a browser, no install, no server, no npm. Just double-click and start shooting.
