@@ -7,7 +7,7 @@ gunplay on the inside.
 **It's one file.** No build step, no npm, no server. Just open `index.html` in a
 browser (double-click) and start blasting.
 
-[**▶ Play it**](https://jgravelle.github.io/jBrainrot-Game/) *(enable GitHub Pages on this repo to activate)*
+[**▶ Play it**](https://jgravelle.github.io/jBrainrot-Game/)
 
 ---
 
