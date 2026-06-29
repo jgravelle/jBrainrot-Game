@@ -84,8 +84,9 @@ Click the screen to lock the pointer and start.
   hitmarkers, tiny hitstop on kills, and headshots for bonus score.
 - **Combo / streak system** — chain kills fast to ramp a greedy multiplier; miss
   or idle and it decays. The core "one more run" hook.
-- **The brainrot** — blocky, asymmetric, waddling meme enemies (Skibidi Toilet,
-  Tung Tung Tung Sahur, Tralalero Tralala, Bombardiro Crocodilo, and friends)
+- **The brainrot** — blocky, asymmetric, waddling meme enemies (Skibbidy Potty,
+  Tongue Tongue Surfer, Tralaloo Lalalero, Bombardino Crocodingo, and friends —
+  recognizably similar to the originals, legally distinct and dumber)
   with camera-facing name labels.
 - **Radar** — bottom-left minimap: you (white, centered), enemies (red), ammo
   (yellow), and health (green), 360° around you.
