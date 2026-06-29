@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BRAINROT SHOOTER</title>
+<title>jBrainRot</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb; }
@@ -95,6 +95,9 @@
   .title { font-size: 64px; font-weight:bold; letter-spacing:3px;
            color:#ffd23f; text-shadow: 5px 5px 0 #d23f3f, 9px 9px 0 #000; margin-bottom:6px; }
   .title.small { font-size:46px; }
+  .title .jb { color:#46e06a; }
+  .tag { font-size: 24px; font-weight:bold; letter-spacing:12px; color:#fff;
+         text-shadow:3px 3px 0 #000; margin: 2px 0 4px; padding-left:12px; }
   .sub { font-size: 20px; margin: 6px 0; opacity:.95; }
   .blink { animation: blink 1s steps(2,start) infinite; font-size:26px; margin-top:22px; color:#7CFC00; }
   @keyframes blink { 50% { opacity: 0.25; } }
@@ -126,7 +129,8 @@
 <div id="ammo" class="hud-block"><span id="ammo-n">24</span><small>AMMO</small></div>
 
 <div id="start" class="overlay">
-  <div class="title">BRAINROT<br>SHOOTER</div>
+  <div class="title"><span class="jb">j</span>BrainRot</div>
+  <div class="tag">SHOOTER</div>
   <div class="sub">Shoot the brainrot before it gets you.</div>
   <div class="blink">CLICK TO PLAY</div>
   <div class="keys">
@@ -148,7 +152,7 @@
 (function () {
 
 // =====================================================================
-//  BRAINROT SHOOTER  —  single-file voxel meme FPS
+//  jBrainRot  —  single-file voxel meme FPS
 // =====================================================================
 
 // ---------- Three.js core ----------

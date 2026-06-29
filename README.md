@@ -1,4 +1,4 @@
-# jBrainrot-Game — BRAINROT SHOOTER
+# jBrainRot — a voxel meme FPS
 
 A janky-on-purpose, weirdly-addictive voxel first-person shooter. Parody of the
 viral meme FPS — ugly Minecraft-esque cubes on the outside, tight and juicy
