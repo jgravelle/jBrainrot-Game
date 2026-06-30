@@ -109,6 +109,13 @@
   #ammo small { display:block; font-size:13px; color:#fff; opacity:.8; letter-spacing:3px; }
   #ammo.reload { color:#ff6b3d; }
 
+  /* grenade readout */
+  #nades { bottom: 16px; right: 20px; top: auto; font-size: 36px;
+           color:#9bd34a; text-align:center; line-height:1;
+           text-shadow: 3px 3px 0 #000, -1px -1px 0 #000; }
+  #nades small { display:block; font-size:13px; color:#fff; opacity:.8; letter-spacing:3px; }
+  #nades.empty { opacity:.45; }
+
   /* overlays */
   .overlay {
     position: fixed; inset:0; display:flex; flex-direction:column;
@@ -155,6 +162,7 @@
 
 <canvas id="radar" width="156" height="156"></canvas>
 <div id="ammo" class="hud-block"><span id="ammo-n">24</span><small>AMMO</small></div>
+<div id="nades" class="hud-block empty"><span id="nade-n">0</span><small>NADES</small></div>
 
 <div id="start" class="overlay">
   <div class="title"><span class="jb">j</span>BrainRot</div>
@@ -162,7 +170,7 @@
   <div class="sub">Shoot the brainrot before it gets you.</div>
   <div class="blink">CLICK TO PLAY</div>
   <div class="keys">
-    <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>SHIFT</b> sprint &nbsp; <b>ESC</b> pause
+    <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>ESC</b> pause
   </div>
 </div>
 
@@ -353,6 +361,7 @@ const player = {
   ammo: 24,
   maxAmmo: 24,
   reloading: 0,       // remaining reload time
+  grenades: 0,        // thrown with right-click; picked up in packs of 3
   alive: true,
 };
 const RELOAD_TIME = 1.05;
@@ -509,6 +518,16 @@ function burst(x,y,z,color,n,power){
       Math.cos(a)*sp, up*sp, Math.sin(a)*sp, 0.4+Math.random()*0.3);
   }
 }
+// red, dice-sized cube splatters when a bullet bites into an enemy
+function bloodBurst(x,y,z,n,power){
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, up=Math.random()*0.9+0.1;
+    const sp = (power||3)*(0.4+Math.random());
+    const red = (Math.random()<0.5) ? 0xc81e1e : 0x9b0d12;   // two shades for depth
+    spawnParticle(x,y,z, red, 0.15+Math.random()*0.09,        // ~dice-sized
+      Math.cos(a)*sp, up*sp, Math.sin(a)*sp, 0.45+Math.random()*0.35);
+  }
+}
 
 // =====================================================================
 //  HUD refs + helpers
@@ -533,6 +552,8 @@ const RAD_R = RAD_SIZE/2 - 5;        // usable radius
 const RAD_RANGE = 46;                // world units mapped to radar edge (covers whole arena)
 const elAmmo = document.getElementById('ammo');
 const elAmmoN = document.getElementById('ammo-n');
+const elNade = document.getElementById('nades');
+const elNadeN = document.getElementById('nade-n');
 const elWave = document.getElementById('wave');
 const elWaveBanner = document.getElementById('wavebanner');
 const elBossBar = document.getElementById('bossbar');
@@ -660,11 +681,14 @@ document.addEventListener('keydown', (e)=>{
   keys[e.code]=true;
   if(e.code==='ShiftLeft' || e.code==='ShiftRight') trySprint();
   if(e.code==='KeyR') startReload();
+  // grenade on 'G' — guard e.repeat so holding the key throws once, not every frame
+  if(e.code==='KeyG' && !e.repeat) throwGrenade();
 });
 document.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
 
 document.addEventListener('mousedown', (e)=>{
-  if(e.button===0 && document.pointerLockElement===canvas && G.running) shoot();
+  if(document.pointerLockElement!==canvas || !G.running) return;
+  if(e.button===0) shoot();
 });
 
 function trySprint(){
@@ -719,7 +743,7 @@ function hitEnemy(e, head, point){
   e.stagger = 0.18;
   const dmg = head?2:1;
   e.hp -= dmg;
-  burst(point.x, point.y, point.z, head? 0x5fd0ff : e.color, head?9:6, head?4:3);
+  bloodBurst(point.x, point.y, point.z, head?13:8, head?4:3);
 
   if(e.hp<=0){
     killEnemy(e, head, point);
@@ -777,6 +801,9 @@ function killEnemy(e, head, point){
       });
     }
   }
+  // loot drops right where it fell
+  dropPickup(e.group.position.x, e.group.position.z, e.boss);
+
   // remove the enemy group
   scene.remove(e.group);
   // free
@@ -871,41 +898,47 @@ function updateSpawns(dt){
 // =====================================================================
 //  PICKUPS  (health = green, ammo = yellow) — also shown on radar
 // =====================================================================
-const pickups = []; // {mesh, type:'health'|'ammo', x, z, bob}
-let pickupTimer = 0;
+const pickups = []; // {mesh, type:'health'|'ammo', x, z, bob, ttl}
 
-function overlapsObstacle(x,z){
-  for(const o of obstacles){ if(Math.hypot(x-o.x, z-o.z) < o.r+1.2) return true; }
-  return Math.hypot(x,z) < 5; // keep clear of the spawn point too
-}
+const PICKUP_TTL = 11;   // seconds a dropped pickup lingers before fading out
 function makePickup(type, x, z){
+  // keep drops inside the arena bounds
+  x = Math.max(-HALF+2, Math.min(HALF-2, x));
+  z = Math.max(-HALF+2, Math.min(HALF-2, z));
   const g = new THREE.Group();
-  const color = type==='health' ? 0x46e06a : 0xffe14d;
+  const color = type==='health' ? 0x46e06a : type==='grenade' ? 0x4b6320 : 0xffe14d;
   g.add(cube(color, 0.5,0.5,0.5, 0,0,0));
   // little contrasting detail so they read at a glance
   if(type==='health'){
     g.add(cube(0xffffff, 0.55,0.16,0.16, 0,0,0));
     g.add(cube(0xffffff, 0.16,0.55,0.16, 0,0,0));
+  } else if(type==='grenade'){
+    g.add(cube(0x2c3a16, 0.5,0.16,0.5, 0,0.02,0));   // banding
+    g.add(cube(0x9a9a9a, 0.16,0.22,0.16, 0,0.32,0));  // pin/cap on top
   } else {
     g.add(cube(0x333322, 0.5,0.16,0.5, 0,0.08,0));
   }
   g.position.set(x, 0.8, z);
   scene.add(g);
-  pickups.push({ mesh:g, type, x, z, bob:Math.random()*6.28 });
+  pickups.push({ mesh:g, type, x, z, bob:Math.random()*6.28, ttl:PICKUP_TTL });
 }
-function spawnPickupAt(type){
-  let x=0, z=0, tries=0;
-  do {
-    const a=Math.random()*6.2832, r=7+Math.random()*(HALF-10);
-    x=Math.cos(a)*r; z=Math.sin(a)*r; tries++;
-  } while(tries<12 && overlapsObstacle(x,z));
+// enemies drop loot where they fall — bosses always give health, minions roll 2 ammo : 1 health.
+// a grenade pack also drops: always from a boss, 1-in-10 from a minion.
+function dropPickup(x, z, boss){
+  const type = boss ? 'health' : (Math.random() < 1/3 ? 'health' : 'ammo');
   makePickup(type, x, z);
+  if(boss || Math.random() < 0.1) makePickup('grenade', x+1.2, z+0.6);
 }
 function collectPickup(p){
   if(p.type==='health'){
     setHealth(player.hp + 25);
     floatNumber('+25 HP', p.x, 1.4, p.z, true);
     tone(680,0.10,'square',0.14,1040); tone(900,0.08,'sine',0.10,1300);
+  } else if(p.type==='grenade'){
+    player.grenades += 3;                 // packs of 3
+    updateNadeHUD();
+    floatNumber('+3 NADES', p.x, 1.4, p.z, true);
+    tone(360,0.10,'square',0.13,520); tone(520,0.08,'square',0.10,700);
   } else {
     player.ammo = player.maxAmmo; player.reloading = 0;
     elAmmo.classList.remove('reload'); updateAmmoHUD();
@@ -924,16 +957,115 @@ function updatePickups(dt){
       collectPickup(p);
       scene.remove(p.mesh);
       pickups.splice(i,1);
+      continue;
+    }
+    // dropped loot fades out after a while; blink for the last second
+    p.ttl -= dt;
+    if(p.ttl <= 0){
+      scene.remove(p.mesh);
+      pickups.splice(i,1);
+      continue;
+    }
+    p.mesh.visible = (p.ttl > 1) || (Math.sin(p.ttl*22) > 0);
+  }
+}
+
+// =====================================================================
+//  GRENADES  (right-click throw, explode on impact/contact)
+// =====================================================================
+const nades = []; // {mesh, vx,vy,vz, life}
+const NADE_R = 5.5;            // blast radius
+const _fwd = new THREE.Vector3();
+
+function throwGrenade(){
+  if(player.grenades<=0 || !player.alive || !G.running) return;
+  player.grenades--;
+  updateNadeHUD();
+  // little olive cube lobbed along the look direction with an upward arc
+  const m = new THREE.Mesh(BOX, mat(0x4b6320));
+  m.scale.set(0.28,0.28,0.28);
+  const p = yawObj.position;
+  m.position.set(p.x, p.y-0.1, p.z);
+  scene.add(m);
+  camera.getWorldDirection(_fwd);
+  const SPEED = 17;
+  nades.push({
+    mesh:m,
+    vx:_fwd.x*SPEED, vy:_fwd.y*SPEED + 4.5, vz:_fwd.z*SPEED,
+    life:4,
+  });
+  gunRecoil = Math.max(gunRecoil, 0.6);
+  tone(300,0.07,'square',0.10,180);
+}
+
+function explodeNade(x,y,z){
+  const ey = Math.max(0.4, y);
+  // fireball + sparks + smoke
+  burst(x,ey,z, 0xffd24d, 14, 7);
+  burst(x,ey,z, 0xff7a1f, 22, 6);
+  burst(x,ey,z, 0xff3322, 16, 5);
+  for(let i=0;i<10;i++){
+    const a=Math.random()*6.2832, sp=2+Math.random()*3;
+    spawnParticle(x,ey,z, 0x555555, 0.2+Math.random()*0.18,
+      Math.cos(a)*sp, 2+Math.random()*3, Math.sin(a)*sp, 0.6+Math.random()*0.4);
+  }
+  G.shake = Math.max(G.shake, 0.85);
+  G.hitstop = Math.max(G.hitstop, 0.05);
+  tone(70,0.5,'sawtooth',0.26,38); noiseBurst(0.45,0.24); tone(150,0.3,'square',0.16,50);
+
+  // area damage — obliterate minions, chunk the boss
+  for(const e of enemies.slice()){
+    if(!e.alive) continue;
+    const d = Math.hypot(e.group.position.x-x, e.group.position.z-z);
+    if(d < NADE_R){
+      const hp = new THREE.Vector3(); e.head.getWorldPosition(hp);
+      bloodBurst(hp.x, hp.y, hp.z, 10, 4);
+      e.hp -= e.boss ? 8 : 99;
+      if(e.hp<=0){
+        killEnemy(e, false, e.group.position);
+      } else {
+        e.hitFlash=0.12; e.stagger=0.25;
+        const dir = new THREE.Vector3().subVectors(e.group.position, new THREE.Vector3(x,0,z)).setY(0).normalize();
+        e.group.position.addScaledVector(dir, 0.6);
+      }
     }
   }
-  // keep a light scatter of pickups on the field
-  pickupTimer -= dt;
-  if(pickupTimer<=0){
-    const nAmmo   = pickups.filter(p=>p.type==='ammo').length;
-    const nHealth = pickups.filter(p=>p.type==='health').length;
-    if(nAmmo < 3)       spawnPickupAt('ammo');
-    else if(nHealth < 2) spawnPickupAt('health');
-    pickupTimer = 2.8;
+}
+
+function updateNades(dt){
+  for(let i=nades.length-1;i>=0;i--){
+    const n = nades[i];
+    n.vy -= 20*dt;                       // gravity
+    n.mesh.position.x += n.vx*dt;
+    n.mesh.position.y += n.vy*dt;
+    n.mesh.position.z += n.vz*dt;
+    n.mesh.rotation.x += dt*9; n.mesh.rotation.y += dt*7;
+    n.life -= dt;
+
+    const px=n.mesh.position.x, py=n.mesh.position.y, pz=n.mesh.position.z;
+    let boom = false;
+    if(py <= 0.25) boom = true;                              // ground
+    else if(Math.abs(px) > HALF || Math.abs(pz) > HALF) boom = true; // arena wall
+    else if(n.life <= 0) boom = true;                        // fuse
+    else {
+      // contact with any enemy
+      for(const e of enemies){
+        if(!e.alive) continue;
+        const ep = e.group.position;
+        if(Math.hypot(px-ep.x, pz-ep.z) < (e.radius+0.4) && py < 2.6*e.group.scale.x){ boom=true; break; }
+      }
+      // contact with an obstacle block
+      if(!boom){
+        for(const o of obstacles){
+          if(Math.hypot(px-o.x, pz-o.z) < o.r+0.3 && py < 3.4){ boom=true; break; }
+        }
+      }
+    }
+    if(boom){
+      explodeNade(px, py, pz);
+      scene.remove(n.mesh);
+      nades.splice(i,1);
+    }
   }
 }
 
@@ -949,6 +1081,10 @@ function startReload(){
 }
 function updateAmmoHUD(){
   elAmmoN.textContent = player.reloading>0 ? '— —' : player.ammo;
+}
+function updateNadeHUD(){
+  elNadeN.textContent = player.grenades;
+  elNade.classList.toggle('empty', player.grenades<=0);
 }
 
 // =====================================================================
@@ -981,7 +1117,7 @@ function drawRadar(){
     ctx.beginPath(); ctx.arc(sx,sy,size,0,6.2832); ctx.fill();
     ctx.globalAlpha=1;
   }
-  for(const p of pickups) plot(p.x, p.z, p.type==='health'?'#46e06a':'#ffe14d', 2.6);
+  for(const p of pickups) plot(p.x, p.z, p.type==='health'?'#46e06a':p.type==='grenade'?'#9bd34a':'#ffe14d', 2.6);
   for(const e of enemies){ if(e.alive) plot(e.group.position.x, e.group.position.z, e.boss?'#ffd24d':'#ff3b3b', e.boss?6:3); }
   ctx.restore();
 
@@ -1000,9 +1136,8 @@ function drawRadar(){
 // =====================================================================
 function startGame(){
   G.running = true;
-  // first-ever run: kick off wave 1
+  // first-ever run: kick off wave 1 (loot now comes from kills, not random spawns)
   if(G.wave===0 && enemies.length===0){
-    spawnPickupAt('ammo'); spawnPickupAt('health');
     startWave(1);
   }
 }
@@ -1015,6 +1150,8 @@ function resetGame(){
   particles.length=0;
   for(const p of pickups) scene.remove(p.mesh);
   pickups.length=0;
+  for(const n of nades) scene.remove(n.mesh);
+  nades.length=0;
   // reset state
   G.score=0; G.combo=1; G.comboTimer=0; G.bestCombo=1; G.shake=0; G.hitstop=0;
   G.spawnTimer=0; G.fireCd=0; G.running=true;
@@ -1023,16 +1160,15 @@ function resetGame(){
   elBossBar.classList.add('hidden');
   player.hp=100; player.alive=true; player.vel.set(0,0,0);
   player.sprintTime=0; player.sprintCool=0;
-  player.ammo=player.maxAmmo; player.reloading=0; pickupTimer=0;
-  elAmmo.classList.remove('reload'); updateAmmoHUD();
+  player.ammo=player.maxAmmo; player.reloading=0; player.grenades=0;
+  elAmmo.classList.remove('reload'); updateAmmoHUD(); updateNadeHUD();
   yawObj.position.set(0,EYE,0); yaw=0; pitch=0;
   elScore.firstChild.textContent='0';
   setHealth(100);
   breakCombo();
   overOv.classList.add('hidden');
   startOv.classList.add('hidden');
-  // seed a couple of pickups + launch wave 1
-  spawnPickupAt('ammo'); spawnPickupAt('health');
+  // loot now drops from kills — just launch wave 1
   startWave(1);
 }
 
@@ -1155,6 +1291,7 @@ function update(dt){
   if(G.running){
     updateSpawns(dt);
     updatePickups(dt);
+    updateNades(dt);
     const pp = yawObj.position;
     for(const e of enemies){
       if(!e.alive) continue;
@@ -1272,6 +1409,7 @@ window.addEventListener('resize', ()=>{
 // init HUD
 setHealth(100);
 updateAmmoHUD();
+updateNadeHUD();
 
 })();
 </script>
