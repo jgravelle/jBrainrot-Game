@@ -31,6 +31,19 @@
   }
   #wavebanner small { display:block; font-size: 22px; color:#fff; opacity:.85; margin-top:4px; }
   #wavebanner.show { opacity: 1; transform: translateX(-50%) scale(1.12); }
+  #wavebanner.boss { color: #ff3b3b; font-size: 60px; }
+
+  /* boss health bar */
+  #bossbar {
+    position: fixed; top: 86px; left: 50%; transform: translateX(-50%);
+    width: 420px; max-width: 70vw; pointer-events: none; text-align: center;
+  }
+  #bossbar.hidden { display: none; }
+  #bossbar span { display:block; font-size: 16px; font-weight: bold; color: #ff5b5b;
+                  text-shadow: 2px 2px 0 #000; letter-spacing: 1px; margin-bottom: 3px; }
+  #bossbar .track { height: 14px; background: rgba(0,0,0,.5); border: 2px solid #000; overflow: hidden; }
+  #bossbar .track > i { display:block; height:100%; width:100%;
+                        background: linear-gradient(#ff6b6b,#b81026); transition: width .12s; }
   #health  { top: 16px; right: 18px; font-size: 30px; text-align: right; }
   #combo {
     top: 14px; left: 50%; transform: translateX(-50%);
@@ -133,6 +146,7 @@
 <div id="hpbar"><i></i></div>
 
 <div id="wavebanner"></div>
+<div id="bossbar" class="hidden"><span id="boss-name">BOSS</span><div class="track"><i></i></div></div>
 
 <div id="cross"></div>
 <div id="hitmark"><span class="a"></span><span class="b"></span><span class="c"></span><span class="d"></span></div>
@@ -374,6 +388,9 @@ gun.add(muzzle);
 const NAMES = ["Skibbidy Potty","Tongue Tongue Surfer","Tralaloo Lalalero",
   "Bombardino Crocodingo","Ballerino Cappuccino","Chimpanzoodle Bananano","Lurilly Lorilla"];
 const BODY_COLORS = [0xff5e5e,0x5ec8ff,0xffd24d,0x9b5eff,0x5eff8a,0xff8a3d,0xff5ed1,0x3dffd2];
+// big bad parody-of-the-parody bosses
+const BOSS_NAMES = ["Gigachadini Supremo","Bombardiro Apocalypto","Skibbidor the Devourer",
+  "Tralalord Annihilato","Chimpanzilla Rexxo"];
 
 const enemies = [];
 let nameIdx = 0;
@@ -402,10 +419,12 @@ function makeLabel(text){
   return spr.clone();
 }
 
-function makeEnemy(){
+function makeEnemy(opts){
+  const boss = !!(opts && opts.boss);
   const g = new THREE.Group();
-  const col = BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
-  const col2 = BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
+  // bosses get a menacing fixed palette; minions stay random + goofy
+  const col  = boss ? 0x8a1020 : BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
+  const col2 = boss ? 0x12060a : BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
 
   // body parts (slightly asymmetric on purpose)
   const torso = cube(col, 0.9, 1.1, 0.6, 0, 1.15, 0);
@@ -414,30 +433,43 @@ function makeEnemy(){
   const legR  = cube(0x333344, 0.30, 0.9, 0.30,  0.27, 0.45, 0);
   const armL  = cube(col, 0.26, 0.85, 0.26, -0.62, 1.2, 0.02);
   const armR  = cube(col, 0.24, 0.85, 0.24,  0.62, 1.15, -0.02);
-  // goofy eyes
-  const eyeL = cube(0x000000, 0.12,0.12,0.06, -0.16, 2.12, 0.36);
-  const eyeR = cube(0x000000, 0.14,0.14,0.06,  0.18, 2.10, 0.36);
+  // goofy eyes (bosses get angry red ones)
+  const eyeCol = boss ? 0xff2a2a : 0x000000;
+  const eyeL = cube(eyeCol, 0.12,0.12,0.06, -0.16, 2.12, 0.36);
+  const eyeR = cube(eyeCol, 0.14,0.14,0.06,  0.18, 2.10, 0.36);
 
   g.add(torso, head, legL, legR, armL, armR, eyeL, eyeR);
+  if(boss){
+    // a tacky gold crown so it reads as The Boss at a glance
+    g.add(cube(0xffd24d, 0.82, 0.18, 0.82, 0, 2.5, 0));
+    g.add(cube(0xffd24d, 0.16, 0.22, 0.16, -0.26, 2.66, 0));
+    g.add(cube(0xffd24d, 0.16, 0.22, 0.16,  0.26, 2.66, 0));
+    g.add(cube(0xffd24d, 0.16, 0.26, 0.16,  0.0,  2.70, 0));
+  }
 
-  const name = NAMES[nameIdx % NAMES.length]; nameIdx++;
+  const name = boss ? BOSS_NAMES[(nameIdx) % BOSS_NAMES.length]
+                    : NAMES[nameIdx % NAMES.length];
+  nameIdx++;
   const label = makeLabel(name);
   label.position.set(0, 2.9, 0);
+  if(boss) label.scale.set(3.2/2.3, 0.8/2.3, 1); // keep readable after group scale-up
   g.add(label);
 
   // spawn at random edge
   const edge = Math.random()*Math.PI*2;
   const rad = HALF-3;
   g.position.set(Math.cos(edge)*rad, 0, Math.sin(edge)*rad);
+  if(boss) g.scale.setScalar(2.3);
 
   scene.add(g);
 
+  const hp = boss ? Math.round(18 + G.wave*1.6) : 2 + (Math.random()<0.3?1:0);
   const e = {
     group: g,
     head, torso, legL, legR, armL, armR, eyeL, eyeR,
     headParts:[head,eyeL,eyeR],
     parts:[torso,head,legL,legR,armL,armR,eyeL,eyeR],
-    hp: 2 + (Math.random()<0.3?1:0),
+    hp, maxHp:hp,
     speed: 0,
     bob: Math.random()*Math.PI*2,
     lunge: 0,
@@ -448,8 +480,9 @@ function makeEnemy(){
     label,
     alive:true,
     hitFlash:0,
-    radius:0.6,
+    radius: boss ? 1.4 : 0.6,
     attackCd:0,
+    boss,
   };
   enemies.push(e);
   return e;
@@ -502,6 +535,9 @@ const elAmmo = document.getElementById('ammo');
 const elAmmoN = document.getElementById('ammo-n');
 const elWave = document.getElementById('wave');
 const elWaveBanner = document.getElementById('wavebanner');
+const elBossBar = document.getElementById('bossbar');
+const elBossName = document.getElementById('boss-name');
+const elBossFill = elBossBar.querySelector('.track > i');
 
 // =====================================================================
 //  GAME STATE / SCORING / COMBO
@@ -524,6 +560,7 @@ const G = {
   waveActive:false,  // true while a wave's enemies are spawning / alive
   pendingSpawn:0,    // enemies still to spawn this wave
   waveBreak:0,       // countdown between waves
+  boss:null,         // the active boss enemy, if any
 };
 elBestSmall.textContent = 'BEST '+G.best;
 
@@ -696,33 +733,49 @@ function hitEnemy(e, head, point){
 
 function killEnemy(e, head, point){
   e.alive=false;
-  G.hitstop = 0.042;                 // tiny hitstop
-  G.shake = Math.max(G.shake, head?0.35:0.25);
+  const gs = e.group.scale.x;        // bosses are scaled up — match debris/feel to size
+  G.hitstop = e.boss ? 0.12 : 0.042; // chunkier hitstop on a boss kill
+  G.shake = Math.max(G.shake, e.boss ? 0.9 : (head?0.35:0.25));
   bumpCombo();
-  const base = head?150:100;
-  addScore(base, head, e.group.position.x, e.group.position.y+2.2, e.group.position.z);
+  const base = e.boss ? (900 + G.wave*120) : (head?150:100);
+  addScore(base, head, e.group.position.x, e.group.position.y+2.2*gs, e.group.position.z);
 
-  if(head){ SFX.head(); SFX.kill(); }
+  if(e.boss){ SFX.head(); SFX.kill(); tone(90,0.6,'sawtooth',0.24,40); noiseBurst(0.4,0.22); }
+  else if(head){ SFX.head(); SFX.kill(); }
   else SFX.kill();
 
+  if(e.boss){
+    G.boss = null;
+    elBossBar.classList.add('hidden');
+    showWaveBanner._t && clearTimeout(showWaveBanner._t);
+    elWaveBanner.classList.remove('boss');
+    elWaveBanner.innerHTML = 'BOSS DOWN<small>+'+base+'</small>';
+    elWaveBanner.classList.add('show');
+    showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1600);
+  }
+
   // explode into component cubes that scatter + fade
+  const debris = e.boss ? 2 : 1;     // bosses throw more chunks
   for(const p of e.parts){
     const wp = new THREE.Vector3();
     p.getWorldPosition(wp);
-    const sx = p.scale.x, sy=p.scale.y, sz=p.scale.z;
-    const m = new THREE.Mesh(BOX, p.material);
-    m.scale.set(sx,sy,sz);
-    m.position.copy(wp);
-    scene.add(m);
-    const a = Math.random()*Math.PI*2;
-    particles.push({
-      mesh:m,
-      vx:Math.cos(a)*(2+Math.random()*3),
-      vy:3+Math.random()*4,
-      vz:Math.sin(a)*(2+Math.random()*3),
-      life:0.8+Math.random()*0.4, max:1.2,
-      rot:(Math.random()-0.5)*0.6, big:true
-    });
+    const sx = p.scale.x*gs, sy=p.scale.y*gs, sz=p.scale.z*gs;
+    for(let d=0; d<debris; d++){
+      const m = new THREE.Mesh(BOX, p.material);
+      m.scale.set(sx,sy,sz);
+      m.position.copy(wp);
+      scene.add(m);
+      const a = Math.random()*Math.PI*2;
+      const pw = e.boss ? 1.7 : 1;
+      particles.push({
+        mesh:m,
+        vx:Math.cos(a)*(2+Math.random()*3)*pw,
+        vy:(3+Math.random()*4)*pw,
+        vz:Math.sin(a)*(2+Math.random()*3)*pw,
+        life:0.8+Math.random()*0.4, max:1.2,
+        rot:(Math.random()-0.5)*0.6, big:true
+      });
+    }
   }
   // remove the enemy group
   scene.remove(e.group);
@@ -756,20 +809,36 @@ function enemyBaseSpeed(){
 }
 
 function updateWaveHUD(){
-  elWave.textContent = 'WAVE '+G.wave;
+  elWave.textContent = 'WAVE '+G.wave + (isBossWave(G.wave)?' ☠':'');
 }
+function isBossWave(n){ return n>0 && n%5===0; }
+
 function showWaveBanner(n){
-  elWaveBanner.innerHTML = 'WAVE '+n+'<small>'+enemiesForWave(n)+' INCOMING</small>';
+  const boss = isBossWave(n);
+  elWaveBanner.classList.toggle('boss', boss);
+  elWaveBanner.innerHTML = boss
+    ? 'BOSS WAVE '+n+'<small>SOMETHING BIG APPROACHES</small>'
+    : 'WAVE '+n+'<small>'+enemiesForWave(n)+' INCOMING</small>';
   elWaveBanner.classList.add('show');
   clearTimeout(showWaveBanner._t);
-  showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1500);
+  showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), boss?2000:1500);
 }
 
 function startWave(n){
   G.wave = n;
   G.waveActive = true;
-  G.pendingSpawn = enemiesForWave(n);
   G.spawnTimer = 0;          // start spawning right away
+  if(isBossWave(n)){
+    // spawn the boss now + a thinner pack of minions to harass alongside it
+    const boss = makeEnemy({boss:true});
+    boss.speed = enemyBaseSpeed()*0.55;
+    G.boss = boss;
+    G.pendingSpawn = Math.max(2, Math.floor(enemiesForWave(n)/2));
+    elBossName.textContent = boss.name;
+    elBossBar.classList.remove('hidden');
+  } else {
+    G.pendingSpawn = enemiesForWave(n);
+  }
   updateWaveHUD();
   showWaveBanner(n);
 }
@@ -913,7 +982,7 @@ function drawRadar(){
     ctx.globalAlpha=1;
   }
   for(const p of pickups) plot(p.x, p.z, p.type==='health'?'#46e06a':'#ffe14d', 2.6);
-  for(const e of enemies){ if(e.alive) plot(e.group.position.x, e.group.position.z, '#ff3b3b', 3); }
+  for(const e of enemies){ if(e.alive) plot(e.group.position.x, e.group.position.z, e.boss?'#ffd24d':'#ff3b3b', e.boss?6:3); }
   ctx.restore();
 
   // player (white) at center + facing wedge pointing up
@@ -949,8 +1018,9 @@ function resetGame(){
   // reset state
   G.score=0; G.combo=1; G.comboTimer=0; G.bestCombo=1; G.shake=0; G.hitstop=0;
   G.spawnTimer=0; G.fireCd=0; G.running=true;
-  G.wave=0; G.waveActive=false; G.pendingSpawn=0; G.waveBreak=0;
-  elWaveBanner.classList.remove('show');
+  G.wave=0; G.waveActive=false; G.pendingSpawn=0; G.waveBreak=0; G.boss=null;
+  elWaveBanner.classList.remove('show','boss');
+  elBossBar.classList.add('hidden');
   player.hp=100; player.alive=true; player.vel.set(0,0,0);
   player.sprintTime=0; player.sprintCool=0;
   player.ammo=player.maxAmmo; player.reloading=0; pickupTimer=0;
@@ -976,6 +1046,8 @@ function gameOver(){
   document.getElementById('o-combo').textContent='x'+G.bestCombo;
   document.getElementById('o-best').textContent=G.best;
   overOv.classList.remove('hidden');
+  elBossBar.classList.add('hidden');
+  elWaveBanner.classList.remove('show');
   if(document.pointerLockElement) document.exitPointerLock();
 }
 
@@ -1102,6 +1174,7 @@ function update(dt){
       else { e.lunge = Math.max(0, e.lunge-dt); }
 
       if(e.stagger>0){ e.stagger-=dt; sp*=0.25; }
+      if(e.attackCd>0) e.attackCd-=dt;
 
       // move toward player (avoid stacking too tightly is fine for chaos)
       g.position.x += dirX*sp*dt;
@@ -1125,7 +1198,16 @@ function update(dt){
       }
 
       // attack
-      if(dist < 1.5){
+      if(e.boss){
+        // bosses don't pop on contact — they pummel on a cooldown and keep coming
+        if(dist < 2.8 && e.attackCd<=0){
+          playerHit(26);
+          e.attackCd = 1.1;
+          e.lunge = 1;
+          burst(g.position.x, 1.6, g.position.z, 0xff3b3b, 12, 4);
+          G.shake = Math.max(G.shake, 0.6);
+        }
+      } else if(dist < 1.5){
         playerHit(16);
         // pop the enemy on contact
         burst(g.position.x,1.2,g.position.z,e.color,8,3);
@@ -1133,6 +1215,11 @@ function update(dt){
         scene.remove(g);
         const idx=enemies.indexOf(e); if(idx>=0) enemies.splice(idx,1);
       }
+    }
+
+    // boss health bar tracks the live boss
+    if(G.boss && G.boss.alive){
+      elBossFill.style.width = Math.max(0, G.boss.hp/G.boss.maxHp)*100 + '%';
     }
   }
 
