@@ -20,6 +20,9 @@
   #score   { top: 16px; left: 18px;  font-size: 30px; }
   #score small { font-size: 15px; opacity: .8; display:block; }
   #score #wave { color: #ff5bd0; opacity: .95; }
+  #score #remain { color: #fff; opacity: .85; font-size: 14px; }
+  #score #remain b { color: #ff7a7a; }
+  #score #remain.clear b { color: #7CFC00; }
 
   /* wave banner */
   #wavebanner {
@@ -76,6 +79,13 @@
   #cross.hit { transform: translate(-50%,-50%) scale(1.7) rotate(45deg); }
   #cross { transition: transform .07s ease-out; }
 
+  /* sprint-ready bar (just below the crosshair) */
+  #sprint { position: fixed; top: calc(50% + 26px); left: 50%; transform: translateX(-50%);
+            width: 46px; height: 5px; background: rgba(0,0,0,.45); border: 1px solid rgba(0,0,0,.7);
+            pointer-events: none; }
+  #sprint > i { display:block; height:100%; width:100%; background:#5fd0ff; transition: width .05s linear; }
+  #sprint.cooling > i { background:#ff8a3d; }
+
   /* hitmarker (the flick) */
   #hitmark { position: fixed; top:50%; left:50%; transform: translate(-50%,-50%);
              width:30px; height:30px; pointer-events:none; opacity:0; }
@@ -88,6 +98,17 @@
   /* damage flash */
   #dmg { position: fixed; inset:0; pointer-events:none; opacity:0;
          box-shadow: inset 0 0 220px 80px rgba(220,0,0,.9); transition: opacity .12s; }
+
+  /* low-health vignette (separate element from #dmg so the flash logic is untouched) */
+  #lowhp { position: fixed; inset:0; pointer-events:none; opacity:0;
+           box-shadow: inset 0 0 160px 60px rgba(200,0,0,.8); }
+  #lowhp.on { animation: lowpulse 1s ease-in-out infinite; }
+  @keyframes lowpulse { 0%,100% { opacity:.25; } 50% { opacity:.7; } }
+
+  /* mute indicator */
+  #muteind { bottom: 80px; right: 20px; top: auto; font-size: 13px; letter-spacing: 2px;
+             color:#ff8a8a; opacity:0; transition: opacity .2s; }
+  #muteind.on { opacity:.9; }
 
   /* floating score numbers layer */
   #floaters { position: fixed; inset:0; pointer-events:none; overflow:hidden; }
@@ -143,7 +164,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div id="score" class="hud-block">0<small>BEST 0</small><small id="wave">WAVE 1</small></div>
+  <div id="score" class="hud-block">0<small>BEST 0</small><small id="wave">WAVE 1</small><small id="remain">LEFT <b>0</b></small></div>
   <div id="combo" class="hud-block hidden">
     <span class="mult">x1</span>
     <div class="bar"><i></i></div>
@@ -156,27 +177,31 @@
 <div id="bossbar" class="hidden"><span id="boss-name">BOSS</span><div class="track"><i></i></div></div>
 
 <div id="cross"></div>
+<div id="sprint"><i></i></div>
 <div id="hitmark"><span class="a"></span><span class="b"></span><span class="c"></span><span class="d"></span></div>
 <div id="dmg"></div>
+<div id="lowhp"></div>
 <div id="floaters"></div>
+<div id="muteind" class="hud-block">🔇 MUTED</div>
 
 <canvas id="radar" width="156" height="156"></canvas>
 <div id="ammo" class="hud-block"><span id="ammo-n">24</span><small>AMMO</small></div>
 <div id="nades" class="hud-block empty"><span id="nade-n">0</span><small>NADES</small></div>
 
 <div id="start" class="overlay">
-  <div class="title"><span class="jb">j</span>BrainRot</div>
+  <div class="title" id="start-title"><span class="jb">j</span>BrainRot</div>
   <div class="tag">SHOOTER</div>
-  <div class="sub">Shoot the brainrot before it gets you.</div>
-  <div class="blink">CLICK TO PLAY</div>
+  <div class="sub" id="start-sub">Shoot the brainrot before it gets you.</div>
+  <div class="blink" id="start-blink">CLICK TO PLAY</div>
   <div class="keys">
-    <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>ESC</b> pause
+    <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>R</b> reload &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>M</b> mute &nbsp; <b>ESC</b> pause
   </div>
 </div>
 
 <div id="over" class="overlay hidden">
   <div class="title small">GAME OVER</div>
   <div class="stat">SCORE <b id="o-score">0</b></div>
+  <div class="stat">WAVE REACHED <b id="o-wave">1</b></div>
   <div class="stat">BEST COMBO <b id="o-combo">x1</b></div>
   <div class="stat">HIGH SCORE <b id="o-best">0</b></div>
   <div class="blink">CLICK TO RESTART</div>
@@ -313,7 +338,7 @@ let AC = null;
 function audioInit(){ try{ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==='suspended') AC.resume(); }catch(e){} }
 function tone(freq, dur, type, vol, slideTo){
   try{
-    if(!AC) return;
+    if(!AC || G.muted) return;
     const t = AC.currentTime;
     const o = AC.createOscillator(), g = AC.createGain();
     o.type = type||'square';
@@ -328,7 +353,7 @@ function tone(freq, dur, type, vol, slideTo){
 }
 function noiseBurst(dur, vol){
   try{
-    if(!AC) return;
+    if(!AC || G.muted) return;
     const n = Math.floor(AC.sampleRate*dur);
     const buf = AC.createBuffer(1, n, AC.sampleRate);
     const d = buf.getChannelData(0);
@@ -554,6 +579,18 @@ const elAmmo = document.getElementById('ammo');
 const elAmmoN = document.getElementById('ammo-n');
 const elNade = document.getElementById('nades');
 const elNadeN = document.getElementById('nade-n');
+const elRemain = document.getElementById('remain');
+const elRemainN = elRemain.querySelector('b');
+const elLowhp = document.getElementById('lowhp');
+const elSprint = document.getElementById('sprint');
+const elSprintFill = elSprint.querySelector('i');
+const elMuteInd = document.getElementById('muteind');
+const elStartTitle = document.getElementById('start-title');
+const elStartSub = document.getElementById('start-sub');
+const elStartBlink = document.getElementById('start-blink');
+const START_TITLE_HTML = elStartTitle.innerHTML;
+const START_SUB_TEXT = elStartSub.textContent;
+const START_BLINK_TEXT = elStartBlink.textContent;
 const elWave = document.getElementById('wave');
 const elWaveBanner = document.getElementById('wavebanner');
 const elBossBar = document.getElementById('bossbar');
@@ -563,14 +600,20 @@ const elBossFill = elBossBar.querySelector('.track > i');
 // =====================================================================
 //  GAME STATE / SCORING / COMBO
 // =====================================================================
+// localStorage with a try/catch so private-mode browsers don't throw
+function lsGet(k, dflt){ try{ const v=localStorage.getItem(k); return v==null?dflt:v; }catch(e){ return dflt; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+
 const G = {
   running:false,
   score:0,
-  best: Number(sessionStorage.getItem('brainrot_best')||0),
+  best: Number(lsGet('brainrot_best', 0)),
   combo:1,
   comboTimer:0,
   comboWindow:2.6,    // seconds before decay
-  bestCombo:1,
+  bestCombo: Number(lsGet('brainrot_bestcombo', 1)),
+  bestWave: Number(lsGet('brainrot_bestwave', 1)),
+  muted: lsGet('brainrot_muted', '0') === '1',
   shake:0,
   hitstop:0,
   spawnTimer:0,
@@ -644,6 +687,8 @@ function setHealth(h){
   elHealth.textContent = Math.ceil(player.hp);
   elHpBar.style.width = player.hp+'%';
   elHpBar.style.background = player.hp>50? '#46d35a' : player.hp>25? '#ffc63a':'#e23b3b';
+  // persistent low-health vignette (separate element from the transient #dmg flash)
+  elLowhp.classList.toggle('on', player.alive && player.hp>0 && player.hp<25);
 }
 
 // =====================================================================
@@ -654,16 +699,30 @@ function lockPointer(){ canvas.requestPointerLock(); }
 startOv.addEventListener('click', ()=>{ audioInit(); lockPointer(); });
 overOv.addEventListener('click', ()=>{ audioInit(); resetGame(); lockPointer(); });
 
+function setPauseText(paused){
+  if(paused){
+    elStartTitle.textContent = 'PAUSED';
+    elStartSub.textContent = 'Take a breath. The brainrot waits.';
+    elStartBlink.textContent = 'CLICK TO RESUME';
+  } else {
+    elStartTitle.innerHTML = START_TITLE_HTML;
+    elStartSub.textContent = START_SUB_TEXT;
+    elStartBlink.textContent = START_BLINK_TEXT;
+  }
+}
+
 document.addEventListener('pointerlockchange', ()=>{
   const locked = document.pointerLockElement === canvas;
   if(locked){
     startOv.classList.add('hidden');
+    setPauseText(false);
     if(!G.running && player.alive){ startGame(); }
     G.running = player.alive;
   } else {
     // paused (Esc) — only show start overlay if game still alive
     if(player.alive){
       G.running=false;
+      setPauseText(true);
       startOv.classList.remove('hidden');
     }
   }
@@ -683,6 +742,7 @@ document.addEventListener('keydown', (e)=>{
   if(e.code==='KeyR') startReload();
   // grenade on 'G' — guard e.repeat so holding the key throws once, not every frame
   if(e.code==='KeyG' && !e.repeat) throwGrenade();
+  if(e.code==='KeyM' && !e.repeat) toggleMute();
 });
 document.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
 
@@ -837,6 +897,17 @@ function enemyBaseSpeed(){
 
 function updateWaveHUD(){
   elWave.textContent = 'WAVE '+G.wave + (isBossWave(G.wave)?' ☠':'');
+}
+function updateRemainHUD(){
+  // between waves: show the breather countdown; during a wave: show live enemy count
+  if(!G.waveActive && G.waveBreak > 0){
+    elRemain.classList.add('clear');
+    elRemain.innerHTML = 'CLEAR — NEXT IN <b>'+Math.ceil(G.waveBreak)+'</b>';
+  } else {
+    elRemain.classList.remove('clear');
+    const left = G.pendingSpawn + enemies.length;
+    elRemain.innerHTML = 'LEFT <b>'+left+'</b>';
+  }
 }
 function isBossWave(n){ return n>0 && n%5===0; }
 
@@ -1086,6 +1157,25 @@ function updateNadeHUD(){
   elNadeN.textContent = player.grenades;
   elNade.classList.toggle('empty', player.grenades<=0);
 }
+function updateMuteHUD(){
+  elMuteInd.classList.toggle('on', G.muted);
+}
+function toggleMute(){
+  G.muted = !G.muted;
+  lsSet('brainrot_muted', G.muted ? '1' : '0');
+  updateMuteHUD();
+  if(!G.muted){ audioInit(); tone(660,0.08,'square',0.12,900); } // little blip to confirm sound is back
+}
+const SPRINT_COOL = 1.1;   // matches the cooldown set in trySprint()
+function updateSprintHUD(){
+  if(player.sprintCool > 0){
+    elSprint.classList.add('cooling');
+    elSprintFill.style.width = Math.max(0, (1 - player.sprintCool/SPRINT_COOL)) * 100 + '%';
+  } else {
+    elSprint.classList.remove('cooling');
+    elSprintFill.style.width = '100%';
+  }
+}
 
 // =====================================================================
 //  RADAR  (player-relative, forward = up)
@@ -1176,9 +1266,13 @@ function gameOver(){
   player.alive=false;
   G.running=false;
   SFX.over();
-  if(G.score>G.best){ G.best=G.score; sessionStorage.setItem('brainrot_best', G.best); }
+  if(G.score>G.best){ G.best=G.score; lsSet('brainrot_best', G.best); }
+  if(G.bestCombo>Number(lsGet('brainrot_bestcombo',1))) lsSet('brainrot_bestcombo', G.bestCombo);
+  if(G.wave>G.bestWave){ G.bestWave=G.wave; lsSet('brainrot_bestwave', G.bestWave); }
   elBestSmall.textContent='BEST '+G.best;
+  elLowhp.classList.remove('on');
   document.getElementById('o-score').textContent=G.score;
+  document.getElementById('o-wave').textContent=G.wave;
   document.getElementById('o-combo').textContent='x'+G.bestCombo;
   document.getElementById('o-best').textContent=G.best;
   overOv.classList.remove('hidden');
@@ -1292,6 +1386,8 @@ function update(dt){
     updateSpawns(dt);
     updatePickups(dt);
     updateNades(dt);
+    updateRemainHUD();
+    updateSprintHUD();
     const pp = yawObj.position;
     for(const e of enemies){
       if(!e.alive) continue;
@@ -1410,6 +1506,9 @@ window.addEventListener('resize', ()=>{
 setHealth(100);
 updateAmmoHUD();
 updateNadeHUD();
+updateMuteHUD();
+updateRemainHUD();
+updateSprintHUD();
 
 })();
 </script>
