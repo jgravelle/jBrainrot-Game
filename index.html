@@ -421,6 +421,7 @@ const player = {
   reloading: 0,       // remaining reload time
   grenades: 0,        // thrown with right-click; picked up in packs of 3
   shotgun: false,     // unlocked after the first boss kill — fires a hard-hitting pellet spread
+  dblshotgun: false,  // unlocked at the wave-10 boss — both barrels, twice the lead
   lives: 3,           // extra lives — start with 3, +1 for each boss battle won
   invuln: 0,          // seconds of post-revive invulnerability remaining
   alive: true,
@@ -431,6 +432,9 @@ const RELOAD_TIME = 1.05;
 // shotgun: a fan of pellets per trigger-pull, each pellet a full hitscan hit
 const SHOTGUN_PELLETS = 9;
 const SHOTGUN_SPREAD  = 0.055;  // NDC jitter per pellet — tight enough to shred a boss up close
+// double-shotgun (wave-10 boss upgrade): both barrels at once — more lead, a wider wall of it
+const DBLSHOTGUN_PELLETS = 16;
+const DBLSHOTGUN_SPREAD  = 0.078;
 const keys = {};
 let yaw = 0, pitch = 0;
 const PITCH_CLAMP = Math.PI/2 - 0.08;
@@ -442,6 +446,7 @@ const gun = new THREE.Group();
 // two swappable models live under `gun`; only one is visible at a time
 const pistolModel  = new THREE.Group();
 const shotgunModel = new THREE.Group();
+const dblShotgunModel = new THREE.Group();
 (function buildGun(){
   // ---- pistol (starting weapon) ----
   pistolModel.add(cube(0x222226, 0.16, 0.16, 0.55, 0, 0, -0.28));   // body
@@ -460,18 +465,38 @@ const shotgunModel = new THREE.Group();
   shotgunModel.add(cube(0x555560, 0.05, 0.05, 0.05, 0.055,0.05,-0.92));  // muzzle R
   shotgunModel.visible = false;
 
+  // ---- double-shotgun (wave-10 boss upgrade): beefier receiver, stacked over/under barrels ----
+  dblShotgunModel.add(cube(0x2a2a30, 0.28, 0.24, 0.52, 0,  0.00, -0.22));  // fat receiver
+  dblShotgunModel.add(cube(0x14141a, 0.26, 0.12, 0.72, 0,  0.10, -0.62));  // upper barrel
+  dblShotgunModel.add(cube(0x14141a, 0.26, 0.12, 0.72, 0, -0.02, -0.62));  // lower barrel
+  dblShotgunModel.add(cube(0x000000, 0.26, 0.02, 0.72, 0,  0.04, -0.625)); // barrel gap
+  dblShotgunModel.add(cube(0x6a4520, 0.20, 0.13, 0.28, 0, -0.10, -0.52));  // wood pump/forestock
+  dblShotgunModel.add(cube(0x4a2f16, 0.15, 0.24, 0.16, 0, -0.17, -0.02));  // grip
+  dblShotgunModel.add(cube(0x4a2f16, 0.13, 0.18, 0.26, 0, -0.06,  0.20));  // wood stock
+  dblShotgunModel.add(cube(0xcaa64a, 0.04, 0.05, 0.05, 0,  0.04, -0.30));  // brass hinge accent
+  dblShotgunModel.add(cube(0x666672, 0.06, 0.06, 0.06,-0.06, 0.10,-1.00));  // muzzle upper-L
+  dblShotgunModel.add(cube(0x666672, 0.06, 0.06, 0.06, 0.06, 0.10,-1.00));  // muzzle upper-R
+  dblShotgunModel.add(cube(0x666672, 0.06, 0.06, 0.06,-0.06,-0.02,-1.00));  // muzzle lower-L
+  dblShotgunModel.add(cube(0x666672, 0.06, 0.06, 0.06, 0.06,-0.02,-1.00));  // muzzle lower-R
+  dblShotgunModel.visible = false;
+
   gun.add(pistolModel);
   gun.add(shotgunModel);
+  gun.add(dblShotgunModel);
   gun.position.set(0.32, -0.30, -0.6);
   camera.add(gun);
 })();
 // (camera is already in the scene graph via pitchObj; do NOT re-parent it)
 
-// flip the on-screen weapon between pistol and shotgun
-function setWeaponModel(shotgun){
-  pistolModel.visible  = !shotgun;
-  shotgunModel.visible = !!shotgun;
-  muzzle.position.set(0, 0.05, shotgun ? -0.96 : -0.85); // muzzle flash sits at the barrel mouth
+// show the on-screen weapon that matches the player's current tier
+function setWeaponModel(){
+  const dbl = !!player.dblshotgun;
+  const sg  = !dbl && !!player.shotgun;
+  pistolModel.visible     = !dbl && !sg;
+  shotgunModel.visible    = sg;
+  dblShotgunModel.visible = dbl;
+  // muzzle flash sits at the barrel mouth; the double barrel reaches a touch farther
+  muzzle.position.set(0, dbl?0.04:0.05, dbl ? -1.04 : sg ? -0.96 : -0.85);
 }
 
 // muzzle flash sprite
@@ -935,21 +960,25 @@ const pelletDir = new THREE.Vector2();
 function shoot(){
   if(G.fireCd>0 || player.reloading>0) return;
   if(player.ammo<=0){ startReload(); return; }
+  const dbl = player.dblshotgun;
   const sg = player.shotgun;
-  G.fireCd = sg ? 0.42 : 0.12;   // shotgun kicks slower; pistol stays snappy
+  G.fireCd = dbl ? 0.50 : sg ? 0.42 : 0.12;   // heavier the bigger the boom; pistol stays snappy
   player.ammo--;
   updateAmmoHUD();
-  gunRecoil = 1;
-  if(sg){ SFX.shoot(); tone(150,0.12,'sawtooth',0.14,70); noiseBurst(0.08,0.10); }
+  gunRecoil = dbl ? 1.35 : 1;
+  if(dbl){ SFX.shoot(); tone(110,0.16,'sawtooth',0.18,55); noiseBurst(0.12,0.14); }
+  else if(sg){ SFX.shoot(); tone(150,0.12,'sawtooth',0.14,70); noiseBurst(0.08,0.10); }
   else SFX.shoot();
   // muzzle flash
   flashMat.opacity = 1;
-  G.shake = Math.max(G.shake, sg ? 0.28 : 0.12);
+  G.shake = Math.max(G.shake, dbl ? 0.40 : sg ? 0.28 : 0.12);
 
-  const pellets = sg ? SHOTGUN_PELLETS : 1;
+  const spread  = dbl ? DBLSHOTGUN_SPREAD  : SHOTGUN_SPREAD;
+  const pellets = dbl ? DBLSHOTGUN_PELLETS : sg ? SHOTGUN_PELLETS : 1;
+  const spreads = dbl || sg;
   for(let i=0; i<pellets; i++){
-    const ox = sg ? (Math.random()*2-1)*SHOTGUN_SPREAD : 0;
-    const oy = sg ? (Math.random()*2-1)*SHOTGUN_SPREAD : 0;
+    const ox = spreads ? (Math.random()*2-1)*spread : 0;
+    const oy = spreads ? (Math.random()*2-1)*spread : 0;
     firePellet(ox, oy);
   }
   // missed: small combo decay pressure handled by timer; tiny puff is skipped
@@ -1018,18 +1047,30 @@ function killEnemy(e, head, point){
     updateLivesHUD();
     // first boss down grants the shotgun — bigger, meaner, per-pull spread damage
     const firstKill = !player.shotgun;
+    // the wave-10 boss upgrades that shotgun to a double-barrel — twice the lead per pull
+    const dblKill = !firstKill && !player.dblshotgun && G.wave >= 10;
     if(firstKill){
       player.shotgun = true;
       player.ammo = player.maxAmmo;   // hand over a full loaded shotgun
       updateAmmoHUD();
       updateAmmoLabel();
-      setWeaponModel(true);           // swap the viewmodel to the shotgun
+      setWeaponModel();               // swap the viewmodel to the shotgun
       // little pickup fanfare so the upgrade lands
       tone(520,0.10,'square',0.16,900); tone(780,0.14,'square',0.14,1200);
+    } else if(dblKill){
+      player.dblshotgun = true;
+      player.ammo = player.maxAmmo;   // top off both barrels
+      updateAmmoHUD();
+      updateAmmoLabel();
+      setWeaponModel();               // swap to the beefier double-barrel model
+      // deeper, chunkier fanfare for the bigger gun
+      tone(360,0.12,'square',0.18,620); tone(560,0.16,'square',0.15,900); tone(760,0.18,'square',0.13,1150);
     }
     elWaveBanner.innerHTML = firstKill
       ? 'SHOTGUN ACQUIRED<small>+'+base+' · +1 LIFE</small>'
-      : 'BOSS DOWN<small>+'+base+' · +1 LIFE</small>';
+      : dblKill
+        ? 'DOUBLE SHOTGUN<small>+'+base+' · +1 LIFE</small>'
+        : 'BOSS DOWN<small>+'+base+' · +1 LIFE</small>';
     elWaveBanner.classList.add('show');
     showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1600);
   }
@@ -1397,7 +1438,7 @@ function updateAmmoHUD(){
   elAmmoN.textContent = player.reloading>0 ? '— —' : player.ammo;
 }
 function updateAmmoLabel(){
-  elAmmoLabel.textContent = player.shotgun ? 'SHOTGUN' : 'AMMO';
+  elAmmoLabel.textContent = player.dblshotgun ? 'DBL SHOTGUN' : player.shotgun ? 'SHOTGUN' : 'AMMO';
 }
 function updateNadeHUD(){
   elNadeN.textContent = player.grenades;
@@ -1498,10 +1539,10 @@ function resetGame(){
   player.hp=100; player.alive=true; player.vel.set(0,0,0);
   player.sprintTime=0; player.sprintCool=0;
   player.ammo=player.maxAmmo; player.reloading=0; player.grenades=0;
-  player.shotgun=false;
+  player.shotgun=false; player.dblshotgun=false;
   player.lives=START_LIVES; updateLivesHUD();
   player.invuln=0; elInvuln.classList.remove('on');
-  setWeaponModel(false);
+  setWeaponModel();
   elAmmo.classList.remove('reload'); updateAmmoHUD(); updateAmmoLabel(); updateNadeHUD();
   yawObj.position.set(0,EYE,0); yaw=0; pitch=0;
   elScore.firstChild.textContent='0';
