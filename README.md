@@ -87,7 +87,25 @@ the rest. Hold FIRE for auto-fire.
 ## Features
 
 - **First-person movement & mouse-look** built directly on the native Pointer
-  Lock API (no control addons).
+  Lock API (no control addons) — plus **full touch controls** on phones and
+  tablets (floating joystick, look-drag, on-screen buttons).
+- **Waves & bosses** — escalating waves with a crowned, trash-talking boss
+  every 5th wave. Bosses speak in meme-tongue speech bubbles. First boss drops
+  the **shotgun**; the wave-10 boss upgrades it to a **double-barrel**.
+- **Enemy variety** — spitters that hold range and lob goo, kamikazes that
+  sprint in and explode, brutes that hit like a bus, and flyers that glide
+  over cover (grenades can't touch them).
+- **Roguelite upgrades** — every boss kill offers a pick-1-of-3 mutator:
+  THICC MAGS, VAMPIRE AURA, RICOCHET RIZZ, NUCLEAR NADES, GYATT ENERGY, and
+  friends. Builds reset each run.
+- **GYATT DAMAGE crits** — random triple-damage crits with their own fanfare.
+- **Daily Challenge** — one seeded run per UTC day; the whole planet fights the
+  same waves. Share your result to the clipboard with one tap.
+- **High-score board** — arcade-style 3-letter initials, top 10, persisted
+  locally; optional **global + daily online leaderboards** via a tiny PHP API
+  (see [`api/`](api/)).
+- **Achievements** — SIGMA GRINDSET, BUILT DIFFERENT, TOUCH GRASS, and more,
+  persisted across runs.
 - **Juicy shooting** — muzzle flash, synthesized "pew", cube-particle hit bursts,
   hitmarkers, tiny hitstop on kills, and headshots for bonus score.
 - **Combo / streak system** — chain kills fast to ramp a greedy multiplier; miss

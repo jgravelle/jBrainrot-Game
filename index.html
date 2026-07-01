@@ -193,6 +193,12 @@
   .hiscores .row .who  { flex:1; text-align:left; letter-spacing:4px; padding-left:16px; }
   .hiscores .row .pts  { color:#ffe14d; min-width:70px; text-align:right; }
   .hiscores .row.you .pts { color:#7CFC00; }
+  /* leaderboard source tabs (only shown when an API is configured) */
+  .board-tabs { display:flex; gap:8px; justify-content:center; margin-top:10px; }
+  .board-tabs span { font-size:12px; letter-spacing:2px; padding:4px 12px; cursor:pointer;
+                     border:2px solid rgba(255,91,208,.5); color:rgba(255,255,255,.6); border-radius:4px; }
+  .board-tabs span.on { color:#ff5bd0; border-color:#ff5bd0; }
+  .board-tabs.hidden { display:none; }
   /* arcade initials entry */
   #entry.hidden { display:none; }
   #entry .slots { font-size:56px; font-weight:bold; letter-spacing:16px; color:#ffd23f;
@@ -334,6 +340,7 @@
   <div class="blink" id="start-blink">CLICK TO PLAY</div>
   <div class="pillbtn" id="daily-btn">🧠 DAILY RUN <span id="daily-num"></span></div>
   <div class="hiscores-title" id="start-board-title">TOP BRAINROTTERS</div>
+  <div class="board-tabs hidden" id="start-tabs"><span data-src="local" class="on">LOCAL</span><span data-src="world">WORLD</span><span data-src="daily">DAILY</span></div>
   <div id="start-board" class="hiscores"></div>
   <div class="keys desktop">
     <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>R</b> reload &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>M</b> mute &nbsp; <b>ESC</b> pause
@@ -355,6 +362,7 @@
     <div class="hint" id="entry-hint">TYPE A–Z &nbsp; BACKSPACE to fix &nbsp; ENTER to save</div>
     <div id="in-save" class="hidden">SAVE</div>
   </div>
+  <div class="board-tabs hidden" id="over-tabs"><span data-src="local" class="on">LOCAL</span><span data-src="world">WORLD</span><span data-src="daily">DAILY</span></div>
   <div id="board" class="hiscores"></div>
   <div class="achrow" id="over-ach"></div>
   <div>
@@ -1054,13 +1062,17 @@ function boardHTML(highlightIdx){
   }
   return html;
 }
-function renderBoard(highlightIdx){ elBoard.innerHTML = boardHTML(highlightIdx); }
-// start screen: show the board only once at least one score exists
+function renderBoard(highlightIdx){
+  elBoard.innerHTML = boardHTML(highlightIdx);
+  resetTabs(elOverTabs);   // fresh game-over always lands on the LOCAL tab
+}
+// start screen: show the board once a score exists (or whenever online boards are on)
 function renderStartBoard(){
-  const has = loadBoard().length > 0;
+  const has = loadBoard().length > 0 || !!API_URL;
   elStartBoardTitle.style.display = has ? '' : 'none';
   elStartBoard.style.display = has ? '' : 'none';
   if(has) elStartBoard.innerHTML = boardHTML(-1);
+  resetTabs(elStartTabs);
   renderAchRow(elStartAch);
 }
 function updateInitialsUI(){
@@ -1094,6 +1106,7 @@ function submitInitials(){
   elInSave.classList.add('hidden');
   renderBoard(trimmed.indexOf(entry));   // highlight the row we just added
   renderStartBoard();                    // keep the start-screen board in sync
+  submitOnline(entry);                   // fire-and-forget to the world board
   elOverBlink.classList.remove('hidden');
   tone(880,0.10,'square',0.14,1320); tone(1200,0.09,'sine',0.10,1600);
 }
@@ -1287,6 +1300,101 @@ elShareBtn.addEventListener('click', (e)=>{
     navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text, done));
   } else fallbackCopy(text, done);
 });
+
+// =====================================================================
+//  ONLINE LEADERBOARD  (optional — everything degrades to local-only)
+// =====================================================================
+// Set to your deployed endpoint, e.g. 'https://yourdomain.com/jbr/api/scores.php'.
+// Empty string = online boards disabled; the WORLD/DAILY tabs stay hidden.
+const API_URL = '';
+const JBR_SALT = 'jbr-v1-gyatt';   // must match config.php on the server
+
+// FNV-1a 32-bit — mirrors jbrToken() in api/scores.php
+function jbrToken(s){
+  let h = 2166136261;
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h>>>0).toString(16);
+}
+
+async function apiFetch(url, opts){
+  if(!API_URL) return null;
+  try{
+    const ctl = new AbortController();
+    const t = setTimeout(()=>ctl.abort(), 4000);
+    const r = await fetch(url, Object.assign({ signal: ctl.signal }, opts));
+    clearTimeout(t);
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }   // offline / blocked / timeout — never throws into game code
+}
+const apiGet  = (params)=> apiFetch(API_URL+'?'+new URLSearchParams(params));
+const apiPost = (body)=> apiFetch(API_URL, { method:'POST',
+  headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+
+const boardCache = { world:{t:0,data:null}, daily:{t:0,data:null} };
+async function fetchBoard(src){
+  const c = boardCache[src];
+  if(c.data && performance.now()-c.t < 60000) return c.data;
+  const data = await apiGet(src==='daily'
+    ? { mode:'daily', day: dailyStr(), limit: 10 }
+    : { mode:'global', limit: 10 });
+  if(data){ c.data = data; c.t = performance.now(); }
+  return data;
+}
+
+function remoteBoardHTML(list){
+  let html = '<div class="row head"><span class="rank">#</span><span class="who">NAME</span><span class="pts">SCORE</span></div>';
+  if(!list.length){
+    html += '<div class="row"><span class="rank"></span><span class="who">— no scores yet —</span><span class="pts"></span></div>';
+  }
+  for(let i=0;i<list.length;i++){
+    const who = String(list[i].initials||'').replace(/[^A-Z]/g,'').slice(0,3) || '???';
+    html += '<div class="row"><span class="rank">'+(i+1)+'</span>'
+          + '<span class="who">'+who+'</span>'
+          + '<span class="pts">'+(list[i].score|0)+'</span></div>';
+  }
+  return html;
+}
+
+async function showBoard(el, src){
+  if(src==='local'){ el.innerHTML = boardHTML(-1); return; }
+  el.innerHTML = '<div class="row"><span class="rank"></span><span class="who">loading…</span><span class="pts"></span></div>';
+  const data = await fetchBoard(src);
+  el.innerHTML = data ? remoteBoardHTML(data)
+    : '<div class="row"><span class="rank"></span><span class="who">OFFLINE — LOCAL ONLY</span><span class="pts"></span></div>';
+}
+
+const elStartTabs = document.getElementById('start-tabs');
+const elOverTabs  = document.getElementById('over-tabs');
+function initTabs(tabsEl, boardEl){
+  if(!API_URL) return;   // tabs stay hidden without a backend
+  tabsEl.classList.remove('hidden');
+  tabsEl.querySelectorAll('span').forEach(sp=>{
+    sp.addEventListener('click', (e)=>{
+      e.stopPropagation();   // don't restart/resume the game
+      tabsEl.querySelectorAll('span').forEach(x=>x.classList.remove('on'));
+      sp.classList.add('on');
+      showBoard(boardEl, sp.dataset.src);
+    });
+  });
+}
+function resetTabs(tabsEl){
+  tabsEl.querySelectorAll('span').forEach((x,i)=>x.classList.toggle('on', i===0));
+}
+initTabs(elStartTabs, elStartBoard);
+initTabs(elOverTabs, elBoard);
+
+// fire-and-forget submit after initials are saved locally
+function submitOnline(entry){
+  if(!API_URL) return;
+  const mk = (mode, day)=>({
+    initials: entry.initials, score: entry.score, wave: entry.wave, combo: entry.combo,
+    mode, day: day || undefined,
+    t: jbrToken(entry.score+'|'+entry.wave+'|'+(day||'')+'|'+JBR_SALT),
+  });
+  apiPost(mk('global', null)).then(r=>{ if(r && r.ok) boardCache.world.data = null; });
+  if(G.daily) apiPost(mk('daily', dailyStr())).then(r=>{ if(r && r.ok) boardCache.daily.data = null; });
+}
 
 // =====================================================================
 //  POINTER LOCK / INPUT
