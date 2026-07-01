@@ -172,6 +172,10 @@
          text-shadow:3px 3px 0 #000; margin: 2px 0 4px; padding-left:12px; }
   .sub { font-size: 20px; margin: 6px 0; opacity:.95; }
   .blink { animation: blink 1s steps(2,start) infinite; font-size:26px; margin-top:22px; color:#7CFC00; }
+  .pillbtn { display:inline-block; margin-top:12px; padding:8px 26px; border:3px solid #ff5bd0;
+             color:#ff5bd0; font-size:18px; font-weight:bold; letter-spacing:2px; border-radius:8px;
+             cursor:pointer; text-shadow:1px 1px 0 #000; }
+  .pillbtn:hover { filter: brightness(1.35); }
   @keyframes blink { 50% { opacity: 0.25; } }
   .stat { font-size: 28px; margin:4px 0; }
   .stat b { color:#ffe14d; }
@@ -328,6 +332,7 @@
   <div class="tag">SHOOTER</div>
   <div class="sub" id="start-sub">Shoot the brainrot before it gets you.</div>
   <div class="blink" id="start-blink">CLICK TO PLAY</div>
+  <div class="pillbtn" id="daily-btn">🧠 DAILY RUN <span id="daily-num"></span></div>
   <div class="hiscores-title" id="start-board-title">TOP BRAINROTTERS</div>
   <div id="start-board" class="hiscores"></div>
   <div class="keys desktop">
@@ -342,6 +347,7 @@
 <div id="over" class="overlay hidden">
   <div class="title small">GAME OVER</div>
   <div class="stat">SCORE <b id="o-score">0</b> &nbsp;·&nbsp; WAVE <b id="o-wave">1</b> &nbsp;·&nbsp; COMBO <b id="o-combo">x1</b></div>
+  <div id="daily-result" class="sub" style="display:none; color:#ff5bd0"></div>
   <div id="entry" class="hidden">
     <div class="sub" style="color:#7CFC00">NEW HIGH SCORE!</div>
     <div class="slots" id="in-slots"></div>
@@ -351,6 +357,10 @@
   </div>
   <div id="board" class="hiscores"></div>
   <div class="achrow" id="over-ach"></div>
+  <div>
+    <div class="pillbtn" id="share-btn" style="display:none">📋 SHARE</div>
+    <div class="pillbtn" id="classic-btn" style="display:none">🎮 CLASSIC RUN</div>
+  </div>
   <div class="blink" id="over-blink">CLICK TO RESTART</div>
 </div>
 
@@ -726,8 +736,8 @@ function makeEnemy(opts){
   else if(type==='kamikaze'){ col = 0xe23b3b; col2 = 0x7a1010; }
   else if(type==='brute'){    col = 0x8a8f98; col2 = 0x5a5f68; }
   else {
-    col  = BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
-    col2 = BODY_COLORS[(Math.random()*BODY_COLORS.length)|0];
+    col  = BODY_COLORS[(rngSpawn()*BODY_COLORS.length)|0];
+    col2 = BODY_COLORS[(rngSpawn()*BODY_COLORS.length)|0];
   }
 
   // body parts (slightly asymmetric on purpose)
@@ -771,7 +781,7 @@ function makeEnemy(opts){
   g.add(label);
 
   // spawn at random edge
-  const edge = Math.random()*Math.PI*2;
+  const edge = rngSpawn()*Math.PI*2;
   const rad = HALF-3;
   g.position.set(Math.cos(edge)*rad, 0, Math.sin(edge)*rad);
   const gs = boss ? 2.3 : type==='brute' ? 1.6 : type==='kamikaze' ? 0.8 : 1;
@@ -785,7 +795,7 @@ function makeEnemy(opts){
   const hp = boss ? Math.round(18 + G.wave*1.6)
            : type==='brute'    ? Math.round(7 + G.wave*0.3)
            : type==='kamikaze' ? 1
-           : 2 + (Math.random()<0.3?1:0);
+           : 2 + (rngSpawn()<0.3?1:0);
   const parts = [torso,head,armL,armR,eyeL,eyeR];
   if(legL) parts.push(legL, legR);
   if(wingL) parts.push(wingL, wingR);
@@ -809,6 +819,9 @@ function makeEnemy(opts){
     attackCd:0,
     boss,
     type,
+    // loot pre-rolled at spawn time so the daily seed isn't skewed by kill order
+    drop: boss ? 'health' : (rngSpawn() < 1/3 ? 'health' : 'ammo'),
+    nadeDrop: boss ? true : rngSpawn() < 0.1,
   };
   enemies.push(e);
   return e;
@@ -993,6 +1006,7 @@ const G = {
   boss:null,         // the active boss enemy, if any
   awaitingInitials:false, // true while the game-over initials prompt is open
   overAt:0,          // timestamp of the last game over — guards panic-tap instant restarts
+  daily:false,       // true when running the seeded daily challenge
   choosing:false,    // true while the boss-kill upgrade choice is open (sim freezes)
   bossesDown:0,      // bosses defeated this run — indexes the upgrade offers
   critCount:0,       // crits landed this run (GYATT LORD)
@@ -1202,6 +1216,77 @@ function setHealth(h){
 function updateLivesHUD(){
   elLives.textContent = player.lives > 0 ? '♥'.repeat(player.lives) : '♡';
 }
+
+// =====================================================================
+//  DAILY CHALLENGE  (seeded runs — everyone on Earth gets the same waves)
+// =====================================================================
+// xmur3 string hash → mulberry32 PRNG
+function xmur3(str){
+  let h = 1779033703 ^ str.length;
+  for(let i=0;i<str.length;i++){
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h<<13) | (h>>>19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h>>>16), 2246822507);
+    h = Math.imul(h ^ (h>>>13), 3266489909);
+    return (h ^= h>>>16) >>> 0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a>>>15), 1 | a);
+    t = (t + Math.imul(t ^ (t>>>7), 61 | t)) ^ t;
+    return ((t ^ (t>>>14)) >>> 0) / 4294967296;
+  };
+}
+function seededRng(str){ return mulberry32(xmur3(str)()); }
+
+const DAILY_EPOCH = Date.UTC(2026, 5, 30);   // daily #1 = 2026-07-01 UTC
+function dailyStr(){ return new Date().toISOString().slice(0,10); }   // UTC date
+function dailyNum(){ return Math.max(1, Math.floor((Date.now() - DAILY_EPOCH)/864e5)); }
+
+// the spawn stream: wave composition, spawn edges, hp bonuses, minion colors, drops.
+// Classic mode keeps plain Math.random so nothing changes; daily mode swaps in the
+// day's seed. Anything player-coupled (spread, crits, particles) stays Math.random.
+let rngSpawn = Math.random;
+
+const elDailyResult = document.getElementById('daily-result');
+const elShareBtn = document.getElementById('share-btn');
+const elClassicBtn = document.getElementById('classic-btn');
+document.getElementById('daily-num').textContent = '#'+dailyNum();
+
+function startRun(daily){
+  G.daily = daily;
+  audioInit();
+  resetGame();
+  lockPointer();
+}
+document.getElementById('daily-btn').addEventListener('click', (e)=>{ e.stopPropagation(); startRun(true); });
+elClassicBtn.addEventListener('click', (e)=>{ e.stopPropagation(); startRun(false); });
+
+function fallbackCopy(text, done){
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    ta.remove(); done();
+  }catch(err){}
+}
+elShareBtn.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const text = '🧠 jBrainRot Daily #'+dailyNum()+' — Wave '+G.wave+', '+G.score.toLocaleString()+' pts\n'
+             + 'https://jgravelle.github.io/jBrainrot-Game/';
+  const done = ()=>{
+    elShareBtn.textContent = '✅ COPIED!';
+    setTimeout(()=>{ elShareBtn.textContent = '📋 SHARE'; }, 1400);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text, done));
+  } else fallbackCopy(text, done);
+});
 
 // =====================================================================
 //  POINTER LOCK / INPUT
@@ -1446,7 +1531,9 @@ function rollOffers(bossIndex, rand){
 function openChoice(){
   if(!player.alive) return;
   if(!G.running){ setTimeout(openChoice, 600); return; }   // wait out a pause
-  choiceOffers = rollOffers(G.bossesDown, Math.random);
+  // daily runs seed each boss's offers independently, so everyone sees the same cards
+  const offerRand = G.daily ? seededRng('jbr-daily-'+dailyStr()+':boss:'+G.bossesDown) : Math.random;
+  choiceOffers = rollOffers(G.bossesDown, offerRand);
   if(!choiceOffers.length){ choiceOffers = null; return; } // everything maxed — lucky you
   G.choosing = true;
   for(let i=0;i<3;i++){
@@ -1680,7 +1767,7 @@ function killEnemy(e, head, point){
   if(mods.vampire && player.alive) setHealth(player.hp + mods.vampire);
 
   // loot drops right where it fell
-  dropPickup(e.group.position.x, e.group.position.z, e.boss);
+  dropPickup(e);
 
   // remove the enemy group
   scene.remove(e.group);
@@ -1757,7 +1844,8 @@ function enemyBaseSpeed(){
 }
 
 function updateWaveHUD(){
-  elWave.textContent = 'WAVE '+G.wave + (isBossWave(G.wave)?' ☠':'');
+  elWave.textContent = 'WAVE '+G.wave + (isBossWave(G.wave)?' ☠':'')
+                     + (G.daily ? ' · DAILY #'+dailyNum() : '');
 }
 function updateRemainHUD(){
   // between waves: show the breather countdown; during a wave: show live enemy count
@@ -1819,9 +1907,9 @@ function updateSpawns(dt){
   if(G.pendingSpawn > 0 && G.spawnTimer <= 0){
     const batch = Math.min(G.pendingSpawn, G.wave >= 4 ? 2 : 1);
     for(let i=0;i<batch;i++){
-      const type = rollEnemyType(G.wave, Math.random());
+      const type = rollEnemyType(G.wave, rngSpawn());
       const e = makeEnemy({type});
-      e.speed = enemyBaseSpeed() * (0.85+Math.random()*0.4) * ETYPES[type].speedMul;
+      e.speed = enemyBaseSpeed() * (0.85+rngSpawn()*0.4) * ETYPES[type].speedMul;
       announceType(type);
       G.pendingSpawn--;
     }
@@ -1862,12 +1950,12 @@ function makePickup(type, x, z){
   scene.add(g);
   pickups.push({ mesh:g, type, x, z, bob:Math.random()*6.28, ttl:PICKUP_TTL });
 }
-// enemies drop loot where they fall — bosses always give health, minions roll 2 ammo : 1 health.
-// a grenade pack also drops: always from a boss, 1-in-10 from a minion.
-function dropPickup(x, z, boss){
-  const type = boss ? 'health' : (Math.random() < 1/3 ? 'health' : 'ammo');
-  makePickup(type, x, z);
-  if(boss || Math.random() < 0.1) makePickup('grenade', x+1.2, z+0.6);
+// enemies drop the loot that was pre-rolled at their spawn (bosses: health + nades,
+// minions: 2 ammo : 1 health, 1-in-10 nades) — pre-rolling keeps daily runs in sync.
+function dropPickup(e){
+  const x = e.group.position.x, z = e.group.position.z;
+  makePickup(e.drop, x, z);
+  if(e.nadeDrop) makePickup('grenade', x+1.2, z+0.6);
 }
 function collectPickup(p){
   G.pickupCount++;
@@ -2180,6 +2268,9 @@ function resetGame(){
   G.bossesDown=0; G.critCount=0; G.pickupCount=0; G.bossHitFree=true;
   mods = freshMods();
   player.maxAmmo = 24;
+  // seed (or unseed) the spawn stream for this run
+  rngSpawn = G.daily ? seededRng('jbr-daily-'+dailyStr()) : Math.random;
+  nameIdx = 0;   // names replay in the same order too
   G.awaitingInitials=false; elEntry.classList.add('hidden');
   elWaveBanner.classList.remove('show','boss');
   elBossBar.classList.add('hidden');
@@ -2219,6 +2310,21 @@ function gameOver(){
   document.getElementById('o-score').textContent=G.score;
   document.getElementById('o-wave').textContent=G.wave;
   document.getElementById('o-combo').textContent='x'+G.bestCombo;
+  // daily mode: banked best-of-day, share button, and an exit back to classic
+  if(G.daily){
+    const key = 'brainrot_daily_'+dailyStr();
+    const prev = Number(lsGet(key, 0));
+    if(G.score > prev) lsSet(key, G.score);
+    elDailyResult.textContent = '🧠 DAILY #'+dailyNum()+' — '
+      + (G.score > prev ? 'NEW BEST TODAY!' : 'BEST TODAY: '+Math.max(prev, G.score));
+    elDailyResult.style.display = '';
+    elShareBtn.style.display = '';
+    elClassicBtn.style.display = '';
+  } else {
+    elDailyResult.style.display = 'none';
+    elShareBtn.style.display = 'none';
+    elClassicBtn.style.display = 'none';
+  }
   // high-score board: prompt for initials if this run cracks the top 10
   if(scoreQualifies(G.score)){
     G.awaitingInitials = true;
