@@ -48,6 +48,8 @@
   #bossbar .track > i { display:block; height:100%; width:100%;
                         background: linear-gradient(#ff6b6b,#b81026); transition: width .12s; }
   #health  { top: 16px; right: 18px; font-size: 30px; text-align: right; }
+  #lives   { top: 74px; right: 18px; font-size: 24px; text-align: right; color: #ff5b7a;
+             letter-spacing: 2px; text-shadow: 0 0 6px rgba(255,60,90,.6), 3px 3px 0 #000; }
   #combo {
     top: 14px; left: 50%; transform: translateX(-50%);
     font-size: 26px; text-align: center; transition: transform .08s ease-out;
@@ -104,6 +106,12 @@
            box-shadow: inset 0 0 160px 60px rgba(200,0,0,.8); }
   #lowhp.on { animation: lowpulse 1s ease-in-out infinite; }
   @keyframes lowpulse { 0%,100% { opacity:.25; } 50% { opacity:.7; } }
+
+  /* post-revive invulnerability shield (distinct blue pulse, not the red damage tones) */
+  #invuln { position: fixed; inset:0; pointer-events:none; opacity:0;
+            box-shadow: inset 0 0 150px 55px rgba(90,180,255,.75); }
+  #invuln.on { animation: invpulse .4s ease-in-out infinite; }
+  @keyframes invpulse { 0%,100% { opacity:.12; } 50% { opacity:.5; } }
 
   /* mute indicator */
   #muteind { bottom: 80px; right: 20px; top: auto; font-size: 13px; letter-spacing: 2px;
@@ -188,6 +196,7 @@
     <div class="bar"><i></i></div>
   </div>
   <div id="health" class="hud-block">100</div>
+  <div id="lives" class="hud-block">♥♥♥</div>
 </div>
 <div id="hpbar"><i></i></div>
 
@@ -199,6 +208,7 @@
 <div id="hitmark"><span class="a"></span><span class="b"></span><span class="c"></span><span class="d"></span></div>
 <div id="dmg"></div>
 <div id="lowhp"></div>
+<div id="invuln"></div>
 <div id="floaters"></div>
 <div id="muteind" class="hud-block">🔇 MUTED</div>
 
@@ -411,8 +421,12 @@ const player = {
   reloading: 0,       // remaining reload time
   grenades: 0,        // thrown with right-click; picked up in packs of 3
   shotgun: false,     // unlocked after the first boss kill — fires a hard-hitting pellet spread
+  lives: 3,           // extra lives — start with 3, +1 for each boss battle won
+  invuln: 0,          // seconds of post-revive invulnerability remaining
   alive: true,
 };
+const START_LIVES = 3;
+const REVIVE_INVULN = 2.2;   // shielded window after spending a life
 const RELOAD_TIME = 1.05;
 // shotgun: a fan of pellets per trigger-pull, each pellet a full hitscan hit
 const SHOTGUN_PELLETS = 9;
@@ -612,6 +626,7 @@ function bloodBurst(x,y,z,n,power){
 const elScore = document.getElementById('score');
 const elBestSmall = elScore.querySelector('small');
 const elHealth = document.getElementById('health');
+const elLives = document.getElementById('lives');
 const elHpBar = document.querySelector('#hpbar > i');
 const elCombo = document.getElementById('combo');
 const elMult = elCombo.querySelector('.mult');
@@ -635,6 +650,7 @@ const elNadeN = document.getElementById('nade-n');
 const elRemain = document.getElementById('remain');
 const elRemainN = elRemain.querySelector('b');
 const elLowhp = document.getElementById('lowhp');
+const elInvuln = document.getElementById('invuln');
 const elSprint = document.getElementById('sprint');
 const elSprintFill = elSprint.querySelector('i');
 const elMuteInd = document.getElementById('muteind');
@@ -832,6 +848,11 @@ function setHealth(h){
   elLowhp.classList.toggle('on', player.alive && player.hp>0 && player.hp<25);
 }
 
+// hearts = remaining extra lives; a hollow heart placeholder keeps the row from collapsing at 0
+function updateLivesHUD(){
+  elLives.textContent = player.lives > 0 ? '♥'.repeat(player.lives) : '♡';
+}
+
 // =====================================================================
 //  POINTER LOCK / INPUT
 // =====================================================================
@@ -992,6 +1013,9 @@ function killEnemy(e, head, point){
     elBossBar.classList.add('hidden');
     showWaveBanner._t && clearTimeout(showWaveBanner._t);
     elWaveBanner.classList.remove('boss');
+    // winning a boss battle grants an extra life
+    player.lives++;
+    updateLivesHUD();
     // first boss down grants the shotgun — bigger, meaner, per-pull spread damage
     const firstKill = !player.shotgun;
     if(firstKill){
@@ -1004,8 +1028,8 @@ function killEnemy(e, head, point){
       tone(520,0.10,'square',0.16,900); tone(780,0.14,'square',0.14,1200);
     }
     elWaveBanner.innerHTML = firstKill
-      ? 'SHOTGUN ACQUIRED<small>+'+base+'</small>'
-      : 'BOSS DOWN<small>+'+base+'</small>';
+      ? 'SHOTGUN ACQUIRED<small>+'+base+' · +1 LIFE</small>'
+      : 'BOSS DOWN<small>+'+base+' · +1 LIFE</small>';
     elWaveBanner.classList.add('show');
     showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1600);
   }
@@ -1046,14 +1070,56 @@ function killEnemy(e, head, point){
 // =====================================================================
 //  ENEMY DAMAGE TO PLAYER
 // =====================================================================
+// On revive, drop the player at the arena-edge point farthest from where they
+// died and clearest of live enemies — never back into the swarm that killed them.
+function respawnFarFrom(px, pz){
+  const lim = HALF - 2.5;
+  let best = {x:0, z:0}, bestScore = -Infinity;
+  for(let i=0;i<32;i++){
+    const a = (i/32)*Math.PI*2;
+    const cx = Math.cos(a)*lim, cz = Math.sin(a)*lim;
+    let s = Math.hypot(cx-px, cz-pz);          // reward distance from the death spot
+    for(const e of enemies){                   // and from any live enemy (capped so far edges tie-break by death distance)
+      if(e.alive){ s += Math.min(Math.hypot(cx-e.group.position.x, cz-e.group.position.z), 14)*0.6; }
+    }
+    if(s>bestScore){ bestScore=s; best={x:cx, z:cz}; }
+  }
+  const np = new THREE.Vector3(best.x, EYE, best.z);
+  collide(np);                                 // shove out of any cover block we landed on
+  yawObj.position.copy(np);
+  yawObj.position.y = EYE;
+  player.vel.set(0,0,0);
+}
+
 function playerHit(amount){
-  if(!player.alive) return;
+  if(!player.alive || player.invuln > 0) return;
   setHealth(player.hp - amount);
   damageFlash();
   G.shake = Math.max(G.shake, 0.4);
   SFX.hurt();
   breakCombo();
-  if(player.hp<=0) gameOver();
+  if(player.hp<=0){
+    if(player.lives > 0){
+      // spend an extra life: revive at full health instead of ending the run
+      player.lives--;
+      updateLivesHUD();
+      setHealth(maxHealth());
+      // teleport clear of the swarm and grant a brief shielded window
+      respawnFarFrom(yawObj.position.x, yawObj.position.z);
+      player.invuln = REVIVE_INVULN;
+      elInvuln.classList.add('on');
+      G.shake = Math.max(G.shake, 0.8);
+      // brief revive fanfare + a banner so the save reads clearly
+      tone(300,0.12,'square',0.18,700); tone(520,0.16,'square',0.15,1000);
+      elWaveBanner.classList.remove('boss');
+      elWaveBanner.innerHTML = 'EXTRA LIFE<small>'+player.lives+' LEFT</small>';
+      elWaveBanner.classList.add('show');
+      clearTimeout(showWaveBanner._t);
+      showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1400);
+    } else {
+      gameOver();
+    }
+  }
 }
 
 // =====================================================================
@@ -1433,6 +1499,8 @@ function resetGame(){
   player.sprintTime=0; player.sprintCool=0;
   player.ammo=player.maxAmmo; player.reloading=0; player.grenades=0;
   player.shotgun=false;
+  player.lives=START_LIVES; updateLivesHUD();
+  player.invuln=0; elInvuln.classList.remove('on');
   setWeaponModel(false);
   elAmmo.classList.remove('reload'); updateAmmoHUD(); updateAmmoLabel(); updateNadeHUD();
   yawObj.position.set(0,EYE,0); yaw=0; pitch=0;
@@ -1448,6 +1516,7 @@ function resetGame(){
 function gameOver(){
   player.alive=false;
   G.running=false;
+  player.invuln=0; elInvuln.classList.remove('on');
   SFX.over();
   if(G.score>G.best){ G.best=G.score; lsSet('brainrot_best', G.best); }
   if(G.bestCombo>Number(lsGet('brainrot_bestcombo',1))) lsSet('brainrot_bestcombo', G.bestCombo);
@@ -1519,6 +1588,11 @@ function update(dt){
     // sprint timers
     if(player.sprintTime>0) player.sprintTime-=dt;
     if(player.sprintCool>0) player.sprintCool-=dt;
+    // post-revive invulnerability countdown
+    if(player.invuln>0){
+      player.invuln-=dt;
+      if(player.invuln<=0){ player.invuln=0; elInvuln.classList.remove('on'); }
+    }
     const sprinting = player.sprintTime>0;
     const spd = player.speed * (sprinting?player.sprintMul:1);
 
@@ -1716,6 +1790,7 @@ window.addEventListener('resize', ()=>{
 
 // init HUD
 setHealth(100);
+updateLivesHUD();
 updateAmmoHUD();
 updateNadeHUD();
 updateMuteHUD();
