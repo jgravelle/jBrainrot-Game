@@ -203,7 +203,7 @@
 <div id="muteind" class="hud-block">🔇 MUTED</div>
 
 <canvas id="radar" width="156" height="156"></canvas>
-<div id="ammo" class="hud-block"><span id="ammo-n">24</span><small>AMMO</small></div>
+<div id="ammo" class="hud-block"><span id="ammo-n">24</span><small id="ammo-label">AMMO</small></div>
 <div id="nades" class="hud-block empty"><span id="nade-n">0</span><small>NADES</small></div>
 
 <div id="start" class="overlay">
@@ -410,9 +410,13 @@ const player = {
   maxAmmo: 24,
   reloading: 0,       // remaining reload time
   grenades: 0,        // thrown with right-click; picked up in packs of 3
+  shotgun: false,     // unlocked after the first boss kill — fires a hard-hitting pellet spread
   alive: true,
 };
 const RELOAD_TIME = 1.05;
+// shotgun: a fan of pellets per trigger-pull, each pellet a full hitscan hit
+const SHOTGUN_PELLETS = 9;
+const SHOTGUN_SPREAD  = 0.055;  // NDC jitter per pellet — tight enough to shred a boss up close
 const keys = {};
 let yaw = 0, pitch = 0;
 const PITCH_CLAMP = Math.PI/2 - 0.08;
@@ -421,15 +425,40 @@ const PITCH_CLAMP = Math.PI/2 - 0.08;
 //  WEAPON VIEWMODEL
 // =====================================================================
 const gun = new THREE.Group();
+// two swappable models live under `gun`; only one is visible at a time
+const pistolModel  = new THREE.Group();
+const shotgunModel = new THREE.Group();
 (function buildGun(){
-  gun.add(cube(0x222226, 0.16, 0.16, 0.55, 0, 0, -0.28));   // body
-  gun.add(cube(0x111114, 0.10, 0.10, 0.42, 0, 0.02, -0.55)); // barrel
-  gun.add(cube(0x333339, 0.14, 0.22, 0.14, 0, -0.13, -0.05)); // grip
-  gun.add(cube(0xff5533, 0.06, 0.06, 0.06, 0, 0.05, -0.78));  // muzzle tip
+  // ---- pistol (starting weapon) ----
+  pistolModel.add(cube(0x222226, 0.16, 0.16, 0.55, 0, 0, -0.28));   // body
+  pistolModel.add(cube(0x111114, 0.10, 0.10, 0.42, 0, 0.02, -0.55)); // barrel
+  pistolModel.add(cube(0x333339, 0.14, 0.22, 0.14, 0, -0.13, -0.05)); // grip
+  pistolModel.add(cube(0xff5533, 0.06, 0.06, 0.06, 0, 0.05, -0.78));  // muzzle tip
+
+  // ---- shotgun (post-boss upgrade): chunkier, twin-barrel, wood furniture ----
+  shotgunModel.add(cube(0x2a2a30, 0.24, 0.20, 0.50, 0,  0.00, -0.22));  // receiver
+  shotgunModel.add(cube(0x14141a, 0.22, 0.11, 0.66, 0,  0.05, -0.60));  // wide twin barrel
+  shotgunModel.add(cube(0x000000, 0.02, 0.11, 0.66, 0,  0.05, -0.605)); // barrel seam
+  shotgunModel.add(cube(0x5a3a1a, 0.18, 0.11, 0.26, 0, -0.07, -0.52));  // wood pump/forestock
+  shotgunModel.add(cube(0x4a2f16, 0.14, 0.22, 0.15, 0, -0.15, -0.02));  // grip
+  shotgunModel.add(cube(0x4a2f16, 0.12, 0.16, 0.24, 0, -0.05,  0.18));  // wood stock
+  shotgunModel.add(cube(0x555560, 0.05, 0.05, 0.05,-0.055,0.05,-0.92));  // muzzle L
+  shotgunModel.add(cube(0x555560, 0.05, 0.05, 0.05, 0.055,0.05,-0.92));  // muzzle R
+  shotgunModel.visible = false;
+
+  gun.add(pistolModel);
+  gun.add(shotgunModel);
   gun.position.set(0.32, -0.30, -0.6);
   camera.add(gun);
 })();
 // (camera is already in the scene graph via pitchObj; do NOT re-parent it)
+
+// flip the on-screen weapon between pistol and shotgun
+function setWeaponModel(shotgun){
+  pistolModel.visible  = !shotgun;
+  shotgunModel.visible = !!shotgun;
+  muzzle.position.set(0, 0.05, shotgun ? -0.96 : -0.85); // muzzle flash sits at the barrel mouth
+}
 
 // muzzle flash sprite
 const flashMat = new THREE.SpriteMaterial({ color:0xffee66, transparent:true, opacity:0, depthTest:false });
@@ -600,6 +629,7 @@ const RAD_R = RAD_SIZE/2 - 5;        // usable radius
 const RAD_RANGE = 46;                // world units mapped to radar edge (covers whole arena)
 const elAmmo = document.getElementById('ammo');
 const elAmmoN = document.getElementById('ammo-n');
+const elAmmoLabel = document.getElementById('ammo-label');
 const elNade = document.getElementById('nades');
 const elNadeN = document.getElementById('nade-n');
 const elRemain = document.getElementById('remain');
@@ -879,21 +909,38 @@ const raycaster = new THREE.Raycaster();
 const screenCenter = new THREE.Vector2(0,0);
 let gunRecoil = 0;
 
+const pelletDir = new THREE.Vector2();
+
 function shoot(){
   if(G.fireCd>0 || player.reloading>0) return;
   if(player.ammo<=0){ startReload(); return; }
-  G.fireCd = 0.12;          // tight cooldown
+  const sg = player.shotgun;
+  G.fireCd = sg ? 0.42 : 0.12;   // shotgun kicks slower; pistol stays snappy
   player.ammo--;
   updateAmmoHUD();
   gunRecoil = 1;
-  SFX.shoot();
+  if(sg){ SFX.shoot(); tone(150,0.12,'sawtooth',0.14,70); noiseBurst(0.08,0.10); }
+  else SFX.shoot();
   // muzzle flash
   flashMat.opacity = 1;
-  G.shake = Math.max(G.shake, 0.12);
+  G.shake = Math.max(G.shake, sg ? 0.28 : 0.12);
 
-  raycaster.setFromCamera(screenCenter, camera);
+  const pellets = sg ? SHOTGUN_PELLETS : 1;
+  for(let i=0; i<pellets; i++){
+    const ox = sg ? (Math.random()*2-1)*SHOTGUN_SPREAD : 0;
+    const oy = sg ? (Math.random()*2-1)*SHOTGUN_SPREAD : 0;
+    firePellet(ox, oy);
+  }
+  // missed: small combo decay pressure handled by timer; tiny puff is skipped
+}
 
-  // gather candidate meshes (enemy parts) — raycast against them
+// one hitscan pellet aimed at screen-center + (ox,oy) jitter in NDC space
+function firePellet(ox, oy){
+  pelletDir.set(ox, oy);
+  raycaster.setFromCamera(pelletDir, camera);
+
+  // gather candidate meshes (enemy parts) — raycast against them.
+  // rebuilt per pellet so an enemy already dropped by a prior pellet is skipped.
   const hitList = [];
   for(const e of enemies){ if(e.alive) for(const p of e.parts) hitList.push(p); }
   const hits = raycaster.intersectObjects(hitList, false);
@@ -905,10 +952,8 @@ function shoot(){
     if(e){
       const headShot = (e.headParts.indexOf(mesh) >= 0);
       hitEnemy(e, headShot, h.point);
-      return;
     }
   }
-  // missed: small combo decay pressure handled by timer; tiny puff is skipped
 }
 
 function hitEnemy(e, head, point){
@@ -947,7 +992,20 @@ function killEnemy(e, head, point){
     elBossBar.classList.add('hidden');
     showWaveBanner._t && clearTimeout(showWaveBanner._t);
     elWaveBanner.classList.remove('boss');
-    elWaveBanner.innerHTML = 'BOSS DOWN<small>+'+base+'</small>';
+    // first boss down grants the shotgun — bigger, meaner, per-pull spread damage
+    const firstKill = !player.shotgun;
+    if(firstKill){
+      player.shotgun = true;
+      player.ammo = player.maxAmmo;   // hand over a full loaded shotgun
+      updateAmmoHUD();
+      updateAmmoLabel();
+      setWeaponModel(true);           // swap the viewmodel to the shotgun
+      // little pickup fanfare so the upgrade lands
+      tone(520,0.10,'square',0.16,900); tone(780,0.14,'square',0.14,1200);
+    }
+    elWaveBanner.innerHTML = firstKill
+      ? 'SHOTGUN ACQUIRED<small>+'+base+'</small>'
+      : 'BOSS DOWN<small>+'+base+'</small>';
     elWaveBanner.classList.add('show');
     showWaveBanner._t = setTimeout(()=>elWaveBanner.classList.remove('show'), 1600);
   }
@@ -1272,6 +1330,9 @@ function startReload(){
 function updateAmmoHUD(){
   elAmmoN.textContent = player.reloading>0 ? '— —' : player.ammo;
 }
+function updateAmmoLabel(){
+  elAmmoLabel.textContent = player.shotgun ? 'SHOTGUN' : 'AMMO';
+}
 function updateNadeHUD(){
   elNadeN.textContent = player.grenades;
   elNade.classList.toggle('empty', player.grenades<=0);
@@ -1371,7 +1432,9 @@ function resetGame(){
   player.hp=100; player.alive=true; player.vel.set(0,0,0);
   player.sprintTime=0; player.sprintCool=0;
   player.ammo=player.maxAmmo; player.reloading=0; player.grenades=0;
-  elAmmo.classList.remove('reload'); updateAmmoHUD(); updateNadeHUD();
+  player.shotgun=false;
+  setWeaponModel(false);
+  elAmmo.classList.remove('reload'); updateAmmoHUD(); updateAmmoLabel(); updateNadeHUD();
   yawObj.position.set(0,EYE,0); yaw=0; pitch=0;
   elScore.firstChild.textContent='0';
   setHealth(100);
@@ -1417,15 +1480,15 @@ function gameOver(){
 // =====================================================================
 //  COLLISION (player vs obstacles + arena bounds)
 // =====================================================================
-function collide(pos){
+function collide(pos, radius=0.5){
   // arena bounds
   const lim = HALF-1.5;
   pos.x = Math.max(-lim, Math.min(lim, pos.x));
   pos.z = Math.max(-lim, Math.min(lim, pos.z));
-  // obstacles (circle push-out)
+  // obstacles (circle push-out) — radius lets bigger bodies (bosses) clear the cover
   for(const o of obstacles){
     const dx=pos.x-o.x, dz=pos.z-o.z;
-    const d=Math.hypot(dx,dz), min=o.r+0.5;
+    const d=Math.hypot(dx,dz), min=o.r+radius;
     if(d<min && d>0.0001){
       pos.x = o.x + dx/d*min;
       pos.z = o.z + dz/d*min;
@@ -1542,9 +1605,25 @@ function update(dt){
       if(e.stagger>0){ e.stagger-=dt; sp*=0.25; }
       if(e.attackCd>0) e.attackCd-=dt;
 
-      // move toward player (avoid stacking too tightly is fine for chaos)
-      g.position.x += dirX*sp*dt;
-      g.position.z += dirZ*sp*dt;
+      // move toward player, but steer around any cover block in the way
+      let mvX = dirX, mvZ = dirZ;
+      let near=null, nearD=Infinity;
+      for(const o of obstacles){
+        const od = Math.hypot(g.position.x-o.x, g.position.z-o.z);
+        if(od < o.r + e.radius + 0.5 && od < nearD){ near=o; nearD=od; }
+      }
+      if(near && nearD>0.0001){
+        const nx=(g.position.x-near.x)/nearD, nz=(g.position.z-near.z)/nearD; // outward normal
+        if(mvX*nx + mvZ*nz < 0){          // we're heading into the block — slide along it instead
+          let tx=-nz, tz=nx;              // tangent; flip to whichever side faces the player
+          if(tx*dirX + tz*dirZ < 0){ tx=nz; tz=-nx; }
+          mvX = tx + nx*0.2; mvZ = tz + nz*0.2; // mostly tangential, slight outward bias
+          const l=Math.hypot(mvX,mvZ)||1; mvX/=l; mvZ/=l;
+        }
+      }
+      g.position.x += mvX*sp*dt;
+      g.position.z += mvZ*sp*dt;
+      collide(g.position, e.radius); // hard backstop: never end up inside a cover block
 
       // waddle: rock side to side + bob up
       g.rotation.z = Math.sin(e.bob)*0.12;
