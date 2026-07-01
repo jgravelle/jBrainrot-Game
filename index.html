@@ -158,6 +158,24 @@
   .stat b { color:#ffe14d; }
   .keys { font-size:15px; opacity:.7; margin-top:18px; line-height:1.6; }
   .keys b { color:#ffd23f; }
+
+  /* high-score board (shared by game-over + start screens) */
+  .hiscores-title { font-size:15px; letter-spacing:4px; color:#ff5bd0; opacity:.9;
+                    margin:14px 0 4px; text-shadow:2px 2px 0 #000; }
+  .hiscores { margin: 6px 0 2px; min-width: 320px; font-size: 19px; line-height: 1.45; }
+  .hiscores .row { display:flex; justify-content:space-between; gap:20px; padding:0 12px; }
+  .hiscores .row.head { color:#ff5bd0; font-size:13px; letter-spacing:2px; opacity:.85; margin-bottom:2px; }
+  .hiscores .row.you { color:#7CFC00; text-shadow:0 0 8px rgba(124,252,0,.5); }
+  .hiscores .row .rank { width:26px; text-align:right; opacity:.7; }
+  .hiscores .row .who  { flex:1; text-align:left; letter-spacing:4px; padding-left:16px; }
+  .hiscores .row .pts  { color:#ffe14d; min-width:70px; text-align:right; }
+  .hiscores .row.you .pts { color:#7CFC00; }
+  /* arcade initials entry */
+  #entry.hidden { display:none; }
+  #entry .slots { font-size:56px; font-weight:bold; letter-spacing:16px; color:#ffd23f;
+                  text-shadow:3px 3px 0 #000; padding-left:16px; }
+  #entry .slots .cur { color:#7CFC00; }
+  #entry .hint { font-size:14px; opacity:.7; margin-top:4px; letter-spacing:1px; }
 </style>
 </head>
 <body>
@@ -193,6 +211,8 @@
   <div class="tag">SHOOTER</div>
   <div class="sub" id="start-sub">Shoot the brainrot before it gets you.</div>
   <div class="blink" id="start-blink">CLICK TO PLAY</div>
+  <div class="hiscores-title" id="start-board-title">TOP BRAINROTTERS</div>
+  <div id="start-board" class="hiscores"></div>
   <div class="keys">
     <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>R</b> reload &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>M</b> mute &nbsp; <b>ESC</b> pause
   </div>
@@ -200,11 +220,14 @@
 
 <div id="over" class="overlay hidden">
   <div class="title small">GAME OVER</div>
-  <div class="stat">SCORE <b id="o-score">0</b></div>
-  <div class="stat">WAVE REACHED <b id="o-wave">1</b></div>
-  <div class="stat">BEST COMBO <b id="o-combo">x1</b></div>
-  <div class="stat">HIGH SCORE <b id="o-best">0</b></div>
-  <div class="blink">CLICK TO RESTART</div>
+  <div class="stat">SCORE <b id="o-score">0</b> &nbsp;·&nbsp; WAVE <b id="o-wave">1</b> &nbsp;·&nbsp; COMBO <b id="o-combo">x1</b></div>
+  <div id="entry" class="hidden">
+    <div class="sub" style="color:#7CFC00">NEW HIGH SCORE!</div>
+    <div class="slots" id="in-slots"></div>
+    <div class="hint">TYPE A–Z &nbsp; BACKSPACE to fix &nbsp; ENTER to save</div>
+  </div>
+  <div id="board" class="hiscores"></div>
+  <div class="blink" id="over-blink">CLICK TO RESTART</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -625,8 +648,89 @@ const G = {
   pendingSpawn:0,    // enemies still to spawn this wave
   waveBreak:0,       // countdown between waves
   boss:null,         // the active boss enemy, if any
+  awaitingInitials:false, // true while the game-over initials prompt is open
 };
 elBestSmall.textContent = 'BEST '+G.best;
+
+// =====================================================================
+//  HIGH-SCORE BOARD  (top 10, persisted; initials entered at game over)
+// =====================================================================
+const LB_KEY = 'brainrot_scores';
+const LB_MAX = 10;
+const elBoard  = document.getElementById('board');
+const elEntry  = document.getElementById('entry');
+const elSlots  = document.getElementById('in-slots');
+const elOverBlink = document.getElementById('over-blink');
+const elStartBoard = document.getElementById('start-board');
+const elStartBoardTitle = document.getElementById('start-board-title');
+let initials = '';
+
+function loadBoard(){
+  try{ const a = JSON.parse(lsGet(LB_KEY, '[]')); return Array.isArray(a) ? a : []; }
+  catch(e){ return []; }
+}
+function saveBoard(list){ lsSet(LB_KEY, JSON.stringify(list.slice(0, LB_MAX))); }
+// qualifies if the board isn't full yet, or the score beats the current #10
+function scoreQualifies(score){
+  if(score <= 0) return false;
+  const b = loadBoard();
+  return b.length < LB_MAX || score > b[b.length-1].score;
+}
+function boardHTML(highlightIdx){
+  const b = loadBoard();
+  let html = '<div class="row head"><span class="rank">#</span><span class="who">NAME</span><span class="pts">SCORE</span></div>';
+  if(!b.length){
+    html += '<div class="row"><span class="rank"></span><span class="who">— no scores yet —</span><span class="pts"></span></div>';
+  }
+  for(let i=0;i<b.length;i++){
+    const e = b[i];
+    html += '<div class="row'+(i===highlightIdx?' you':'')+'">'
+          + '<span class="rank">'+(i+1)+'</span>'
+          + '<span class="who">'+(e.initials||'???')+'</span>'
+          + '<span class="pts">'+e.score+'</span></div>';
+  }
+  return html;
+}
+function renderBoard(highlightIdx){ elBoard.innerHTML = boardHTML(highlightIdx); }
+// start screen: show the board only once at least one score exists
+function renderStartBoard(){
+  const has = loadBoard().length > 0;
+  elStartBoardTitle.style.display = has ? '' : 'none';
+  elStartBoard.style.display = has ? '' : 'none';
+  if(has) elStartBoard.innerHTML = boardHTML(-1);
+}
+function updateInitialsUI(){
+  let html = '';
+  for(let i=0;i<3;i++){
+    const ch  = initials[i] || '_';
+    const cur = (i === initials.length && initials.length < 3);
+    html += '<span'+(cur ? ' class="cur"' : '')+'>'+ch+'</span>';
+  }
+  elSlots.innerHTML = html;
+}
+function handleInitialsKey(e){
+  if(e.code === 'Enter'){ if(initials.length > 0) submitInitials(); return; }
+  if(e.code === 'Backspace'){ initials = initials.slice(0, -1); updateInitialsUI(); return; }
+  if(/^[a-zA-Z]$/.test(e.key) && initials.length < 3){
+    initials += e.key.toUpperCase();
+    updateInitialsUI();
+    tone(520 + initials.length*90, 0.05, 'square', 0.10, 760);
+  }
+}
+function submitInitials(){
+  const list = loadBoard();
+  const entry = { initials: initials, score: G.score, wave: G.wave, combo: G.bestCombo };
+  list.push(entry);
+  list.sort((a,b)=> b.score - a.score);
+  const trimmed = list.slice(0, LB_MAX);
+  saveBoard(trimmed);
+  G.awaitingInitials = false;
+  elEntry.classList.add('hidden');
+  renderBoard(trimmed.indexOf(entry));   // highlight the row we just added
+  renderStartBoard();                    // keep the start-screen board in sync
+  elOverBlink.classList.remove('hidden');
+  tone(880,0.10,'square',0.14,1320); tone(1200,0.09,'sine',0.10,1600);
+}
 
 function addScore(base, head, x,y,z){
   const gained = Math.round(base * G.combo);
@@ -704,7 +808,7 @@ function setHealth(h){
 function lockPointer(){ canvas.requestPointerLock(); }
 
 startOv.addEventListener('click', ()=>{ audioInit(); lockPointer(); });
-overOv.addEventListener('click', ()=>{ audioInit(); resetGame(); lockPointer(); });
+overOv.addEventListener('click', ()=>{ if(G.awaitingInitials) return; audioInit(); resetGame(); lockPointer(); });
 
 function setPauseText(paused){
   if(paused){
@@ -730,6 +834,7 @@ document.addEventListener('pointerlockchange', ()=>{
     if(player.alive){
       G.running=false;
       setPauseText(true);
+      renderStartBoard();
       startOv.classList.remove('hidden');
     }
   }
@@ -744,6 +849,8 @@ document.addEventListener('mousemove', (e)=>{
 });
 
 document.addEventListener('keydown', (e)=>{
+  // while the game-over initials prompt is open, keys go to it and nothing else
+  if(G.awaitingInitials){ handleInitialsKey(e); e.preventDefault(); return; }
   keys[e.code]=true;
   if(e.code==='ShiftLeft' || e.code==='ShiftRight') trySprint();
   if(e.code==='KeyR') startReload();
@@ -1258,6 +1365,7 @@ function resetGame(){
   G.score=0; G.combo=1; G.comboTimer=0; G.bestCombo=1; G.shake=0; G.hitstop=0;
   G.spawnTimer=0; G.fireCd=0; G.running=true;
   G.wave=0; G.waveActive=false; G.pendingSpawn=0; G.waveBreak=0; G.boss=null;
+  G.awaitingInitials=false; elEntry.classList.add('hidden');
   elWaveBanner.classList.remove('show','boss');
   elBossBar.classList.add('hidden');
   player.hp=100; player.alive=true; player.vel.set(0,0,0);
@@ -1286,7 +1394,20 @@ function gameOver(){
   document.getElementById('o-score').textContent=G.score;
   document.getElementById('o-wave').textContent=G.wave;
   document.getElementById('o-combo').textContent='x'+G.bestCombo;
-  document.getElementById('o-best').textContent=G.best;
+  // high-score board: prompt for initials if this run cracks the top 10
+  if(scoreQualifies(G.score)){
+    G.awaitingInitials = true;
+    initials = '';
+    updateInitialsUI();
+    elEntry.classList.remove('hidden');
+    elOverBlink.classList.add('hidden');   // hold off "click to restart" until initials are saved
+    renderBoard(-1);
+  } else {
+    G.awaitingInitials = false;
+    elEntry.classList.add('hidden');
+    elOverBlink.classList.remove('hidden');
+    renderBoard(-1);
+  }
   overOv.classList.remove('hidden');
   elBossBar.classList.add('hidden');
   elWaveBanner.classList.remove('show');
@@ -1521,6 +1642,7 @@ updateNadeHUD();
 updateMuteHUD();
 updateRemainHUD();
 updateSprintHUD();
+renderStartBoard();
 
 })();
 </script>
