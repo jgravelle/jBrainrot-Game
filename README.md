@@ -1,3 +1,5 @@
+<img width="1909" height="949" alt="image" src="https://github.com/user-attachments/assets/e650f332-1d04-4327-af20-69103bbaa748" />
+
 # jBrainRot — a voxel meme FPS
 
 A janky-on-purpose, weirdly-addictive voxel first-person shooter. Parody of the
