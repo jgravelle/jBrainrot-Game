@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>jBrainRot</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb;
+               touch-action: none; overscroll-behavior: none; -webkit-touch-callout: none; }
   #game { position: fixed; inset: 0; display: block; }
   body { font-family: "Courier New", Courier, monospace; }
 
@@ -184,6 +185,52 @@
                   text-shadow:3px 3px 0 #000; padding-left:16px; }
   #entry .slots .cur { color:#7CFC00; }
   #entry .hint { font-size:14px; opacity:.7; margin-top:4px; letter-spacing:1px; }
+
+  /* ---------- touch controls ---------- */
+  #touchui.hidden { display: none; }
+  #joy { position: fixed; width: 124px; height: 124px; border-radius: 50%; display: none;
+         background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.35);
+         pointer-events: none; z-index: 4; }
+  #joy-nub { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px;
+             border-radius: 50%; background: rgba(255,255,255,.45);
+             border: 2px solid rgba(0,0,0,.4); transform: translate(-50%,-50%); }
+  .tbtn { position: fixed; border-radius: 50%; color: #fff; font-weight: bold;
+          display: flex; align-items: center; justify-content: center;
+          text-shadow: 2px 2px 0 #000; z-index: 4; touch-action: none;
+          -webkit-user-select: none; user-select: none; }
+  .tbtn:active { filter: brightness(1.6); }
+  #btn-fire { right: 20px; bottom: 70px; bottom: calc(70px + env(safe-area-inset-bottom));
+              width: 88px; height: 88px; font-size: 20px;
+              background: rgba(255,80,80,.25); border: 2px solid rgba(255,120,120,.6); }
+  #btn-nade { right: 124px; bottom: 46px; bottom: calc(46px + env(safe-area-inset-bottom));
+              width: 58px; height: 58px; font-size: 13px;
+              background: rgba(155,211,74,.2); border: 2px solid rgba(155,211,74,.55); }
+  #btn-sprint { right: 108px; bottom: 152px; bottom: calc(152px + env(safe-area-inset-bottom));
+                width: 58px; height: 58px; font-size: 13px;
+                background: rgba(95,208,255,.2); border: 2px solid rgba(95,208,255,.55); }
+  #pausebtn { position: fixed; top: 12px; right: 12px; width: 44px; height: 44px;
+              border-radius: 10px; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.4);
+              color: #fff; font-size: 16px; display: flex; align-items: center; justify-content: center;
+              z-index: 4; touch-action: none; -webkit-user-select: none; user-select: none; }
+
+  /* touch initials entry */
+  #entry { position: relative; }
+  #in-input { position: absolute; opacity: 0; width: 1px; height: 1px; border: 0; padding: 0; }
+  #in-save { display: inline-block; margin-top: 14px; padding: 10px 34px; border: 3px solid #7CFC00;
+             color: #7CFC00; font-size: 22px; font-weight: bold; letter-spacing: 3px;
+             border-radius: 8px; cursor: pointer; }
+  #in-save.hidden { display: none; }
+
+  /* touch-mode layout shuffle (body.touch is set by JS when touch is detected) */
+  .keys.touch-hint { display: none; }
+  body.touch .keys.desktop { display: none; }
+  body.touch .keys.touch-hint { display: block; }
+  body.touch #health { right: 68px; }
+  body.touch #hpbar { right: 68px; }
+  body.touch #lives { right: 68px; }
+  body.touch #radar { left: auto; right: 12px; bottom: auto; top: 104px; width: 92px; height: 92px; }
+  body.touch #nades { right: auto; left: calc(50% + 96px); }
+  body.touch #muteind { display: none; }
 </style>
 </head>
 <body>
@@ -212,6 +259,14 @@
 <div id="floaters"></div>
 <div id="muteind" class="hud-block">🔇 MUTED</div>
 
+<div id="touchui" class="hidden">
+  <div id="joy"><div id="joy-nub"></div></div>
+  <div id="btn-fire" class="tbtn">FIRE</div>
+  <div id="btn-nade" class="tbtn">NADE</div>
+  <div id="btn-sprint" class="tbtn">DASH</div>
+  <div id="pausebtn">&#10074;&#10074;</div>
+</div>
+
 <canvas id="radar" width="156" height="156"></canvas>
 <div id="ammo" class="hud-block"><span id="ammo-n">24</span><small id="ammo-label">AMMO</small></div>
 <div id="nades" class="hud-block empty"><span id="nade-n">0</span><small>NADES</small></div>
@@ -223,8 +278,11 @@
   <div class="blink" id="start-blink">CLICK TO PLAY</div>
   <div class="hiscores-title" id="start-board-title">TOP BRAINROTTERS</div>
   <div id="start-board" class="hiscores"></div>
-  <div class="keys">
+  <div class="keys desktop">
     <b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LEFT-CLICK</b> shoot &nbsp; <b>R</b> reload &nbsp; <b>G</b> grenade &nbsp; <b>SHIFT</b> sprint &nbsp; <b>M</b> mute &nbsp; <b>ESC</b> pause
+  </div>
+  <div class="keys touch-hint">
+    <b>LEFT SIDE</b> move &nbsp; <b>RIGHT SIDE</b> look &nbsp; <b>HOLD FIRE</b> shoot
   </div>
 </div>
 
@@ -234,7 +292,9 @@
   <div id="entry" class="hidden">
     <div class="sub" style="color:#7CFC00">NEW HIGH SCORE!</div>
     <div class="slots" id="in-slots"></div>
-    <div class="hint">TYPE A–Z &nbsp; BACKSPACE to fix &nbsp; ENTER to save</div>
+    <input id="in-input" type="text" maxlength="3" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    <div class="hint" id="entry-hint">TYPE A–Z &nbsp; BACKSPACE to fix &nbsp; ENTER to save</div>
+    <div id="in-save" class="hidden">SAVE</div>
   </div>
   <div id="board" class="hiscores"></div>
   <div class="blink" id="over-blink">CLICK TO RESTART</div>
@@ -254,6 +314,11 @@ const canvas   = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
+
+// touch device? primary-coarse pointers (phones/tablets) get the touch UI up front;
+// hybrid laptops flip touchMode on their first real touch instead.
+const HAS_COARSE = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+let touchMode = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
@@ -435,6 +500,8 @@ const SHOTGUN_SPREAD  = 0.055;  // NDC jitter per pellet — tight enough to shr
 // double-shotgun (wave-10 boss upgrade): both barrels at once — more lead, a wider wall of it
 const DBLSHOTGUN_PELLETS = 16;
 const DBLSHOTGUN_SPREAD  = 0.078;
+const MOUSE_SENS = 0.0022;
+const TOUCH_SENS = 0.0045;   // look-drag needs a heavier hand than mouse deltas
 const keys = {};
 let yaw = 0, pitch = 0;
 const PITCH_CLAMP = Math.PI/2 - 0.08;
@@ -720,6 +787,7 @@ const G = {
   waveBreak:0,       // countdown between waves
   boss:null,         // the active boss enemy, if any
   awaitingInitials:false, // true while the game-over initials prompt is open
+  overAt:0,          // timestamp of the last game over — guards panic-tap instant restarts
 };
 elBestSmall.textContent = 'BEST '+G.best;
 
@@ -797,6 +865,8 @@ function submitInitials(){
   saveBoard(trimmed);
   G.awaitingInitials = false;
   elEntry.classList.add('hidden');
+  elInInput.blur(); elInInput.value = '';
+  elInSave.classList.add('hidden');
   renderBoard(trimmed.indexOf(entry));   // highlight the row we just added
   renderStartBoard();                    // keep the start-screen board in sync
   elOverBlink.classList.remove('hidden');
@@ -881,46 +951,61 @@ function updateLivesHUD(){
 // =====================================================================
 //  POINTER LOCK / INPUT
 // =====================================================================
-function lockPointer(){ canvas.requestPointerLock(); }
+function lockPointer(){ if(!touchMode) canvas.requestPointerLock(); }
 
-startOv.addEventListener('click', ()=>{ audioInit(); lockPointer(); });
-overOv.addEventListener('click', ()=>{ if(G.awaitingInitials) return; audioInit(); resetGame(); lockPointer(); });
+startOv.addEventListener('click', ()=>{ audioInit(); if(touchMode) resumeFromOverlay(); else lockPointer(); });
+overOv.addEventListener('click', ()=>{
+  if(G.awaitingInitials) return;
+  if(performance.now() - G.overAt < 600) return;   // panic-tap guard right after death
+  audioInit();
+  resetGame();
+  lockPointer();
+});
 
 function setPauseText(paused){
   if(paused){
     elStartTitle.textContent = 'PAUSED';
     elStartSub.textContent = 'Take a breath. The brainrot waits.';
-    elStartBlink.textContent = 'CLICK TO RESUME';
+    elStartBlink.textContent = touchMode ? 'TAP TO RESUME' : 'CLICK TO RESUME';
   } else {
     elStartTitle.innerHTML = START_TITLE_HTML;
     elStartSub.textContent = START_SUB_TEXT;
-    elStartBlink.textContent = START_BLINK_TEXT;
+    elStartBlink.textContent = touchMode ? 'TAP TO PLAY' : START_BLINK_TEXT;
   }
+}
+
+// running/paused is decoupled from pointer lock so touch play works the same way:
+// desktop drives these via pointerlockchange, touch calls them directly.
+function resumeFromOverlay(){
+  startOv.classList.add('hidden');
+  setPauseText(false);
+  if(!G.running && player.alive){ startGame(); }
+  G.running = player.alive;
+}
+function pauseGame(){
+  if(!player.alive) return;
+  G.running = false;
+  resetTouchState();
+  setPauseText(true);
+  renderStartBoard();
+  startOv.classList.remove('hidden');
 }
 
 document.addEventListener('pointerlockchange', ()=>{
   const locked = document.pointerLockElement === canvas;
-  if(locked){
-    startOv.classList.add('hidden');
-    setPauseText(false);
-    if(!G.running && player.alive){ startGame(); }
-    G.running = player.alive;
-  } else {
-    // paused (Esc) — only show start overlay if game still alive
-    if(player.alive){
-      G.running=false;
-      setPauseText(true);
-      renderStartBoard();
-      startOv.classList.remove('hidden');
-    }
-  }
+  if(locked) resumeFromOverlay();
+  else pauseGame();   // Esc — pauseGame no-ops once the player is dead
+});
+
+// auto-pause when the tab is hidden (also covers phones switching apps)
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && G.running) pauseGame();
 });
 
 document.addEventListener('mousemove', (e)=>{
   if(document.pointerLockElement!==canvas) return;
-  const s = 0.0022;
-  yaw   -= e.movementX*s;
-  pitch -= e.movementY*s;
+  yaw   -= e.movementX*MOUSE_SENS;
+  pitch -= e.movementY*MOUSE_SENS;
   pitch = Math.max(-PITCH_CLAMP, Math.min(PITCH_CLAMP, pitch));
 });
 
@@ -947,6 +1032,122 @@ function trySprint(){
     player.sprintCool = 1.1;
   }
 }
+
+// =====================================================================
+//  TOUCH CONTROLS  (floating joystick + look-drag + buttons)
+// =====================================================================
+const touchUI = document.getElementById('touchui');
+const joyEl   = document.getElementById('joy');
+const joyNub  = document.getElementById('joy-nub');
+const elInInput   = document.getElementById('in-input');
+const elInSave    = document.getElementById('in-save');
+const elEntryHint = document.getElementById('entry-hint');
+
+const touchMove = { x:0, z:0 };   // joystick deflection, added to WASD in update()
+let touchFiring = false;          // FIRE held — auto-fires on cooldown in update()
+let joyId = null, lookId = null;  // active touch identifiers (never use e.touches[0])
+const joyAnchor = { x:0, y:0 };
+const lookLast  = { x:0, y:0 };
+const JOY_RANGE = 48;             // px of nub travel = full deflection
+
+function activateTouchMode(){
+  if(touchMode) return;
+  touchMode = true;
+  document.body.classList.add('touch');
+  touchUI.classList.remove('hidden');
+  elOverBlink.textContent = 'TAP TO RESTART';
+  elEntryHint.textContent = 'TAP THE LETTERS TO TYPE · SAVE WHEN DONE';
+  setPauseText(G.wave > 0 && player.alive && !G.running);
+}
+
+function resetTouchState(){
+  touchMove.x = 0; touchMove.z = 0;
+  touchFiring = false;
+  joyId = null; lookId = null;
+  joyEl.style.display = 'none';
+}
+
+function bindBtn(el, down, up){
+  // stopPropagation keeps button presses out of the joystick/look router below
+  el.addEventListener('touchstart', (e)=>{ e.preventDefault(); e.stopPropagation(); audioInit(); down(); }, {passive:false});
+  el.addEventListener('touchend',   (e)=>{ e.preventDefault(); if(up) up(); }, {passive:false});
+  el.addEventListener('touchcancel',()=>{ if(up) up(); });
+}
+bindBtn(document.getElementById('btn-fire'),   ()=>{ touchFiring = true; }, ()=>{ touchFiring = false; });
+bindBtn(document.getElementById('btn-nade'),   ()=>{ throwGrenade(); });
+bindBtn(document.getElementById('btn-sprint'), ()=>{ trySprint(); });
+bindBtn(document.getElementById('pausebtn'),   ()=>{ if(G.running) pauseGame(); });
+
+window.addEventListener('touchstart', (e)=>{
+  activateTouchMode();
+  if(!G.running) return;   // overlay taps are handled by their own click handlers
+  for(const t of e.changedTouches){
+    if(joyId===null && t.clientX < window.innerWidth*0.42){
+      // left zone: anchor a floating joystick right under the thumb
+      joyId = t.identifier;
+      joyAnchor.x = t.clientX; joyAnchor.y = t.clientY;
+      joyEl.style.left = (t.clientX-62)+'px';
+      joyEl.style.top  = (t.clientY-62)+'px';
+      joyNub.style.transform = 'translate(-50%,-50%)';
+      joyEl.style.display = 'block';
+    } else if(lookId===null){
+      lookId = t.identifier;
+      lookLast.x = t.clientX; lookLast.y = t.clientY;
+    }
+  }
+}, {passive:false});
+
+window.addEventListener('touchmove', (e)=>{
+  e.preventDefault();   // kill scroll / pull-to-refresh / pinch
+  if(!G.running) return;
+  for(const t of e.changedTouches){
+    if(t.identifier === joyId){
+      let dx = t.clientX - joyAnchor.x, dy = t.clientY - joyAnchor.y;
+      const d = Math.hypot(dx, dy);
+      if(d > JOY_RANGE){ dx *= JOY_RANGE/d; dy *= JOY_RANGE/d; }
+      touchMove.x = dx/JOY_RANGE;
+      touchMove.z = dy/JOY_RANGE;   // screen-down = backward, same sign as KeyS
+      joyNub.style.transform = 'translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))';
+    } else if(t.identifier === lookId){
+      yaw   -= (t.clientX - lookLast.x)*TOUCH_SENS;
+      pitch -= (t.clientY - lookLast.y)*TOUCH_SENS;
+      pitch = Math.max(-PITCH_CLAMP, Math.min(PITCH_CLAMP, pitch));
+      lookLast.x = t.clientX; lookLast.y = t.clientY;
+    }
+  }
+}, {passive:false});
+
+function touchDone(e){
+  for(const t of e.changedTouches){
+    if(t.identifier === joyId){
+      joyId = null;
+      touchMove.x = 0; touchMove.z = 0;
+      joyEl.style.display = 'none';
+    } else if(t.identifier === lookId){
+      lookId = null;
+    }
+  }
+}
+window.addEventListener('touchend', touchDone);
+window.addEventListener('touchcancel', touchDone);
+document.addEventListener('gesturestart', (e)=>e.preventDefault());   // iOS pinch
+
+// touch initials entry: a hidden input drives the arcade slots via the OS keyboard
+elSlots.addEventListener('click', (e)=>{ if(touchMode){ e.stopPropagation(); elInInput.focus(); } });
+elInInput.addEventListener('keydown', (e)=>{
+  e.stopPropagation();   // keep the document-level initials handler out of the way
+  if(e.key === 'Enter' && initials.length > 0) submitInitials();
+});
+elInInput.addEventListener('input', ()=>{
+  initials = elInInput.value.toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);
+  elInInput.value = initials;
+  updateInitialsUI();
+  tone(520 + initials.length*90, 0.05, 'square', 0.10, 760);
+});
+elInSave.addEventListener('click', (e)=>{
+  e.stopPropagation();   // don't let the tap fall through to the restart overlay
+  if(initials.length > 0) submitInitials();
+});
 
 // =====================================================================
 //  SHOOTING
@@ -1557,6 +1758,8 @@ function resetGame(){
 function gameOver(){
   player.alive=false;
   G.running=false;
+  G.overAt = performance.now();
+  resetTouchState();
   player.invuln=0; elInvuln.classList.remove('on');
   SFX.over();
   if(G.score>G.best){ G.best=G.score; lsSet('brainrot_best', G.best); }
@@ -1572,6 +1775,8 @@ function gameOver(){
     G.awaitingInitials = true;
     initials = '';
     updateInitialsUI();
+    elInInput.value = '';
+    elInSave.classList.toggle('hidden', !touchMode);
     elEntry.classList.remove('hidden');
     elOverBlink.classList.add('hidden');   // hold off "click to restart" until initials are saved
     renderBoard(-1);
@@ -1623,8 +1828,12 @@ function update(dt){
     if(keys['KeyS']) mz+=1;
     if(keys['KeyA']) mx-=1;
     if(keys['KeyD']) mx+=1;
+    mx += touchMove.x; mz += touchMove.z;
     const len=Math.hypot(mx,mz);
-    if(len>0){ mx/=len; mz/=len; }
+    if(len>1){ mx/=len; mz/=len; }   // only clamp overshoot so partial joystick pushes stay analog
+
+    // held FIRE button auto-fires as fast as the cooldown allows
+    if(touchFiring) shoot();
 
     // sprint timers
     if(player.sprintTime>0) player.sprintTime-=dt;
@@ -1838,6 +2047,7 @@ updateMuteHUD();
 updateRemainHUD();
 updateSprintHUD();
 renderStartBoard();
+if(HAS_COARSE) activateTouchMode();
 
 })();
 </script>

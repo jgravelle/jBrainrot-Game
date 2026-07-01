@@ -74,9 +74,15 @@ Now go protect your nuts.
 | **Left-click** | Shoot |
 | **Shift** | Sprint (short cooldown) |
 | **R** | Reload |
+| **G** | Grenade |
+| **M** | Mute |
 | **Esc** | Pause |
 
 Click the screen to lock the pointer and start.
+
+**On phones and tablets** it just works: left side of the screen is a floating
+joystick, right side drags to look, and on-screen FIRE / NADE / DASH buttons do
+the rest. Hold FIRE for auto-fire.
 
 ## Features
 
